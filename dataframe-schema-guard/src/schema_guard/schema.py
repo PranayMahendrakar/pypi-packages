@@ -72,7 +72,7 @@ def _timezone(tz: Any, name: Any, family: str) -> Optional[str]:
         raise ValueError(f"column {name!r}: tz only applies to the datetime family, not {family!r}")
     label = tz if isinstance(tz, str) else str(tz)
     try:
-        pd.DatetimeTZDtype(tz=label)
+        pd.DatetimeTZDtype(unit="ns", tz=label)
     except (TypeError, ValueError, KeyError) as exc:
         raise ValueError(f"column {name!r}: {label!r} is not a known timezone") from exc
     return label

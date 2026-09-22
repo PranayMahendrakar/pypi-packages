@@ -139,16 +139,16 @@ def apply_timezone(series: pd.Series, spec: "ColumnSpec") -> pd.Series:
     target = spec.tz
     if not pdt.is_datetime64_any_dtype(series.dtype):
         # Mixed offsets parse to an object column of Timestamps; UTC gives them one dtype.
-        series = pd.to_datetime(series, errors="coerce", utc=True)
+        series = _normalise_unit(pd.to_datetime(series, errors="coerce", utc=True))
     current = getattr(series.dtype, "tz", None)
     if current is None and target is None:
         return series
     try:
         if current is None:
-            return series.dt.tz_localize(target)
+            return _normalise_unit(series.dt.tz_localize(target))
         if target is None:
-            return series.dt.tz_convert("UTC").dt.tz_localize(None)
-        return series.dt.tz_convert(target)
+            return _normalise_unit(series.dt.tz_convert("UTC").dt.tz_localize(None))
+        return _normalise_unit(series.dt.tz_convert(target))
     except Exception as exc:  # pytz raises AmbiguousTimeError/NonExistentTimeError, not ValueError
         raise _fail(spec, series, f"cannot put these datetimes in {_tz_label(target)} ({exc})") from exc
 
@@ -424,6 +424,30 @@ def _datetime_failure(
     else:
         reason = f"{count} value(s) are not parseable datetimes"
     return _fail(spec, series, reason, values, count)
+
+
+#: The resolution every datetime this package produces is pinned to.
+#:
+#: pandas picks its own default - nanoseconds on pandas 2, microseconds on pandas 3 -
+#: and `pd.to_datetime` and `pd.DatetimeTZDtype` both follow it. Left alone, the same
+#: schema enforced on two machines yields columns that will not concat, which is the
+#: one failure this package exists to prevent. So the unit is chosen here rather than
+#: inherited, and every datetime leaves through _normalise_unit.
+DATETIME_UNIT = "ns"
+
+
+def _normalise_unit(series: "pd.Series") -> "pd.Series":
+    """Force a datetime column to DATETIME_UNIT, keeping any timezone it carries."""
+    dtype = series.dtype
+    if isinstance(dtype, pd.DatetimeTZDtype):
+        if dtype.unit != DATETIME_UNIT:
+            return series.astype(pd.DatetimeTZDtype(unit=DATETIME_UNIT, tz=dtype.tz))
+        return series
+    if pdt.is_datetime64_any_dtype(dtype):
+        if getattr(dtype, "unit", DATETIME_UNIT) != DATETIME_UNIT:
+            return series.astype(f"datetime64[{DATETIME_UNIT}]")
+        return series
+    return series
 
 
 def _to_datetime(series: pd.Series, spec: "ColumnSpec") -> pd.Series:
