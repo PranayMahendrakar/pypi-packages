@@ -1,0 +1,146 @@
+name: Publish the next few from the queue
+
+# Runs daily and publishes up to MAX_PER_RUN packages that are approved but not yet
+# on PyPI. Nothing here depends on a developer machine being switched on.
+#
+# Why four: measured, not guessed. On two consecutive days this account published
+# exactly four new projects and then received HTTP 429 on every further upload until
+# roughly the next day. PyPI throttles how fast one account may CREATE projects
+# (updating an existing one is unaffected), so four per run is the real ceiling and
+# asking for more just burns the run.
+
+on:
+  schedule:
+    # 06:20 UTC daily. Deliberately not on the hour: scheduled runs cluster there and
+    # GitHub delays them under load.
+    - cron: "20 6 * * *"
+  workflow_dispatch:
+    inputs:
+      max_packages:
+        description: "How many to attempt this run"
+        required: false
+        default: "4"
+        type: string
+      dry_run:
+        description: "Work out the queue and build, but upload nothing"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  MAX_PER_RUN: ${{ inputs.max_packages || '4' }}
+
+jobs:
+  pick:
+    name: Work out what to publish
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.queue.outputs.packages }}
+      count: ${{ steps.queue.outputs.count }}
+      remaining: ${{ steps.queue.outputs.remaining }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: queue
+        name: Approved, minus whatever is already live
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' > queue.json
+          import json, urllib.request, urllib.error, os
+
+          approved = json.load(open("approved.json"))
+
+          def on_pypi(name: str) -> bool:
+              """Already published? A 404 means no; anything else we treat as yes,
+              because wrongly believing a package is missing would double-publish it,
+              while wrongly skipping one only delays it to tomorrow."""
+              try:
+                  urllib.request.urlopen(
+                      f"https://pypi.org/pypi/{name}/json", timeout=20
+                  ).read(1)
+                  return True
+              except urllib.error.HTTPError as exc:
+                  return exc.code != 404
+              except Exception:
+                  return True
+
+          pending = [name for name in approved if not on_pypi(name)]
+          limit = int(os.environ.get("MAX_PER_RUN", "4") or "4")
+          print(json.dumps({"batch": pending[:limit], "remaining": len(pending)}))
+          PY
+          BATCH=$(python -c "import json;print(json.dumps(json.load(open('queue.json'))['batch']))")
+          REMAIN=$(python -c "import json;print(json.load(open('queue.json'))['remaining'])")
+          COUNT=$(python -c "import json;print(len(json.load(open('queue.json'))['batch']))")
+          echo "packages=$BATCH"   >> "$GITHUB_OUTPUT"
+          echo "count=$COUNT"      >> "$GITHUB_OUTPUT"
+          echo "remaining=$REMAIN" >> "$GITHUB_OUTPUT"
+          echo "### Queue" >> "$GITHUB_STEP_SUMMARY"
+          echo "$REMAIN package(s) still unpublished; attempting $COUNT this run:" >> "$GITHUB_STEP_SUMMARY"
+          python -c "import json;[print('- ' + n) for n in json.load(open('queue.json'))['batch']]" >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: ${{ matrix.package }}
+    needs: pick
+    if: ${{ needs.pick.outputs.count != '0' }}
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # Each matrix job exchanges its own OIDC identity for upload rights to its own
+      # project, so one package's failure cannot publish another's.
+      id-token: write
+    strategy:
+      # Sequential on purpose. Parallel uploads are exactly the burst that trips the
+      # rate limit, and fail-fast off means one bad package does not cancel the rest.
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.pick.outputs.packages) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade build twine
+
+      - name: Test the installed package, not the source beside it
+        working-directory: ${{ matrix.package }}
+        run: |
+          python -m pip install ".[dev]" || python -m pip install . pytest
+          mkdir -p /tmp/run
+          cp -r tests /tmp/run/
+          for extra in README.md pyproject.toml; do
+            [ -f "$extra" ] && cp "$extra" /tmp/run/
+          done
+          cd /tmp/run && python -m pytest -q tests
+
+      - name: Build
+        working-directory: ${{ matrix.package }}
+        run: |
+          rm -rf dist
+          python -m build
+          python -m twine check dist/*
+
+      - name: Publish
+        if: ${{ !inputs.dry_run }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: ${{ matrix.package }}/dist/
+          print-hash: true
+
+      - name: Say what happened
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "- ${{ matrix.package }}: published" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- ${{ matrix.package }}: FAILED - check whether PyPI said 429 (wait, it refills daily)" >> "$GITHUB_STEP_SUMMARY"
+            echo "  or 'name too similar to an existing project' (rename it; retrying will never work)" >> "$GITHUB_STEP_SUMMARY"
+          fi
