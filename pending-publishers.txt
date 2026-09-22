@@ -1,0 +1,43 @@
+Owner: PranayMahendrakar
+Repository: pypi-packages
+Workflow: publish.yml
+Environment: pypi
+
+PENDING (project does not exist yet):
+  auto-label
+  schema-guard
+  ml-feature-check
+  smartclean-df
+  dataset-splitter
+  privacy-scan-ml
+  timeseries-anomaly
+  machine-health
+  quality-predictor
+  energy-analyzer-ai
+  sensor-anomaly
+  model-benchmark
+  offline-ml
+  model-watchdog
+  ml-inference-profiler
+  ml-pipeline-kit
+  prompt-cache
+  text-quality-ai
+  semantic-dedup
+  hallucination-check
+  rag-chunker
+  rag-quality-check
+  llm-router-lite
+  meeting-intelligence
+  image-quality-ai
+  predictive-maintenance
+  document-memory
+  smart-crop-ai
+  multilingual-text
+  image-redactor
+  camera-health
+
+EXISTING (add under each project's own publishing settings):
+  dataset-health
+  near-dupes
+  synthetic-tabular
+  data-drift-lite

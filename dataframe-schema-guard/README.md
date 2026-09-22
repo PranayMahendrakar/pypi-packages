@@ -1,11 +1,15 @@
-# schema-guard
+# dataframe-schema-guard
+
+> Installs as `dataframe-schema-guard`; imports as `schema_guard`. The plain name
+> `schema-guard` is blocked on PyPI for being too close to the existing
+> `schemaguard` and `schema-guardian` projects.
 
 Stop ML pipelines from breaking when incoming data changes shape: infer a schema from one good DataFrame, then validate or enforce it on every batch that follows.
 
 ## Install
 
 ```bash
-pip install schema-guard
+pip install dataframe-schema-guard
 ```
 
 Reading or writing `.parquet` files needs `pip install "schema-guard[parquet]"`.

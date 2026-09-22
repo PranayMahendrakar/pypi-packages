@@ -53,3 +53,29 @@ speech-quality, call-ai-metrics, offline-stt-router
 `publish-daily.ps1`, Windows task "PyPI Daily Publish", daily 17:00, five per run, 90s apart,
 stops on HTTP 429. PyPI enforces a per-day cap on NEW project creation; four in one day
 exhausted it, so roughly five per day is the real ceiling regardless of how fast building goes.
+
+
+## What PyPI actually allows (measured, not guessed)
+
+Two days of evidence, both identical: four new projects published, then every further
+upload returns HTTP 429 until roughly the next day.
+
+    21 Sep  dataset-health, near-dupes, synthetic-tabular, data-drift-lite   -> then 429
+    22 Sep  ml-feature-check, smartclean-df, dataset-splitter, privacy-scan-ml -> then 429
+
+So the ceiling is about four or five NEW projects per day, and it is a burst quota that
+refills rather than a hard daily reset. Publishing an update to a project that already
+exists is not affected; only creating a new one is. At four a day the remaining queue
+takes about a week, which no amount of building faster will change.
+
+## A second failure that is not a rate limit
+
+`schema-guard` returned 400, not 429: "the name is too similar to an existing project".
+`schemaguard` and `schema-guardian` already exist. PyPI blocks confusingly close names,
+and this is invisible to an availability check, because a blocked name still answers
+"not found" on both the JSON and simple APIs. It was renamed to
+`dataframe-schema-guard`, and `publish.sh` now reports a collision differently from a
+rate limit, because one needs a rename and the other needs patience.
+
+Any remaining name could hit the same rule. It surfaces immediately and harmlessly on
+the first upload attempt, so the plan is to handle each as it appears rather than guess.

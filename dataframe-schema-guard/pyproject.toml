@@ -3,7 +3,7 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
-name = "schema-guard"
+name = "dataframe-schema-guard"
 version = "0.1.0"
 description = "Stop ML pipelines from breaking when incoming data changes shape: infer a DataFrame schema once, then validate or enforce it forever"
 readme = "README.md"
@@ -40,10 +40,10 @@ parquet = ["pyarrow>=12"]
 dev = ["pytest>=7"]
 
 [project.scripts]
-schema-guard = "schema_guard.cli:main"
+dataframe-schema-guard = "schema_guard.cli:main"
 
 [project.urls]
-Homepage = "https://pypi.org/project/schema-guard/"
+Homepage = "https://pypi.org/project/dataframe-schema-guard/"
 Author = "https://pypi.org/user/pranaymahendrakar/"
 
 [tool.hatch.build.targets.wheel]

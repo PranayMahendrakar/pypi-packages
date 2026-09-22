@@ -33,7 +33,19 @@ for pkg in "$@"; do
   fi
 
   echo "  -- uploading --"
-  if python -m twine upload --non-interactive "$d"/dist/*; then
+  out=$(python -m twine upload --non-interactive "$d"/dist/* 2>&1)
+  if echo "$out" | grep -qi "too similar to an existing"; then
+    echo "  BLOCKED: PyPI says this name is too close to an existing project."
+    echo "           Rename it in pyproject.toml and rebuild - retrying will never work."
+    failed+=("$pkg (name too similar)")
+    continue
+  fi
+  if echo "$out" | grep -q "429"; then
+    echo "  rate limited - stopping for now, the window refills in about a day"
+    failed+=("$pkg (rate limited)")
+    break
+  fi
+  if ! echo "$out" | grep -qiE "error|failed"; then
     sleep 10
     code=$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/$pkg/json")
     if [ "$code" = "200" ]; then

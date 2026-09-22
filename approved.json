@@ -1,10 +1,6 @@
 [
   "auto-label",
-  "schema-guard",
-  "ml-feature-check",
-  "smartclean-df",
-  "dataset-splitter",
-  "privacy-scan-ml",
+  "dataframe-schema-guard",
   "timeseries-anomaly",
   "machine-health",
   "quality-predictor",
