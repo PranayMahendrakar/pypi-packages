@@ -378,12 +378,14 @@ def _parse_datetimes(base: pd.Series, **options: Any) -> Optional[Tuple[pd.Serie
         warnings.simplefilter("ignore", UserWarning)
         warnings.simplefilter("ignore", FutureWarning)
         try:
-            parsed = pd.to_datetime(base, errors="coerce", **options)
+            parsed = _normalise_unit(pd.to_datetime(base, errors="coerce", **options))
         except (ValueError, TypeError, OverflowError):
             if options.get("utc"):
                 return None
             try:
-                parsed = pd.to_datetime(base, errors="coerce", utc=True, **options)
+                parsed = _normalise_unit(
+                    pd.to_datetime(base, errors="coerce", utc=True, **options)
+                )
             except (ValueError, TypeError, OverflowError):
                 return None
     return parsed, base.notna() & parsed.isna()
@@ -406,7 +408,19 @@ def _out_of_ns_range(value: Any) -> bool:
         return False
     try:
         naive = stamp.tz_convert(None) if stamp.tzinfo is not None else stamp
-        return not (pd.Timestamp.min <= naive <= pd.Timestamp.max)
+    except (TypeError, ValueError, OverflowError):  # pragma: no cover - defensive
+        return False
+    # The bound belongs to the unit this package stores, not to whatever pandas would
+    # have chosen. pandas 3 can hold the year 3000 at microsecond resolution, so
+    # Timestamp.min/max no longer describe a nanosecond column - and every column here
+    # is nanosecond, so a date outside that range really is out of range for us.
+    try:
+        low = pd.Timestamp.min.as_unit(DATETIME_UNIT)
+        high = pd.Timestamp.max.as_unit(DATETIME_UNIT)
+    except (AttributeError, ValueError):  # pandas 2 has no as_unit on the bounds
+        low, high = pd.Timestamp.min, pd.Timestamp.max
+    try:
+        return not (low <= naive <= high)
     except (TypeError, ValueError, OverflowError):  # pragma: no cover - defensive
         return False
 
@@ -437,17 +451,44 @@ DATETIME_UNIT = "ns"
 
 
 def _normalise_unit(series: "pd.Series") -> "pd.Series":
-    """Force a datetime column to DATETIME_UNIT, keeping any timezone it carries."""
+    """Force a datetime column to DATETIME_UNIT, keeping any timezone it carries.
+
+    A value the target unit cannot hold becomes ``NaT`` rather than raising, so the
+    caller's existing "which values went bad" logic reports it as out of range. That
+    matters on pandas 3: it parses '3000-01-01' happily at microsecond resolution, so
+    nothing was ever marked bad, and pinning to nanoseconds afterwards would have
+    dropped the value without a word.
+    """
     dtype = series.dtype
+    target = None
     if isinstance(dtype, pd.DatetimeTZDtype):
         if dtype.unit != DATETIME_UNIT:
-            return series.astype(pd.DatetimeTZDtype(unit=DATETIME_UNIT, tz=dtype.tz))
+            target = pd.DatetimeTZDtype(unit=DATETIME_UNIT, tz=dtype.tz)
+    elif pdt.is_datetime64_any_dtype(dtype):
+        # A plain numpy datetime64 dtype has no `.unit`, so asking for one and
+        # defaulting to ours read every column as already correct and this function
+        # quietly did nothing. The unit is in the dtype's name: datetime64[us].
+        text = str(dtype)
+        unit = text[text.index("[") + 1 : text.index("]")] if "[" in text else DATETIME_UNIT
+        if unit != DATETIME_UNIT:
+            target = f"datetime64[{DATETIME_UNIT}]"
+    if target is None:
         return series
-    if pdt.is_datetime64_any_dtype(dtype):
-        if getattr(dtype, "unit", DATETIME_UNIT) != DATETIME_UNIT:
-            return series.astype(f"datetime64[{DATETIME_UNIT}]")
-        return series
-    return series
+    try:
+        return series.astype(target)
+    except (OutOfBoundsDatetime, OverflowError, ValueError):
+        # Convert what fits and blank what does not, one value at a time.
+        def _one(value: Any) -> Any:
+            if value is pd.NaT or value is None:
+                return pd.NaT
+            try:
+                return pd.Timestamp(value).as_unit(DATETIME_UNIT)
+            except (OutOfBoundsDatetime, OverflowError, ValueError, AttributeError):
+                return pd.NaT
+
+        return pd.Series(
+            [_one(v) for v in series], index=series.index, name=series.name
+        ).astype(target)
 
 
 def _to_datetime(series: pd.Series, spec: "ColumnSpec") -> pd.Series:
