@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "auto-label"
+version = "0.1.0"
+description = "Generate labels for text or tabular data from rules, then extend them with a lightweight ML model and an optional LLM hook"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Pranay Mahendrakar" }]
+keywords = ["labeling", "labelling", "weak-supervision", "text-classification", "rules", "pandas", "scikit-learn", "llm"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "pandas>=1.5",
+  "numpy>=1.23",
+  "scikit-learn>=1.1",
+]
+
+[project.optional-dependencies]
+# heavy or niche deps go here, never in `dependencies`
+parquet = ["pyarrow>=12"]
+# readme_renderer[md] is what PyPI renders the long description with: the test suite
+# uses it to check the README tables survive the trip.
+dev = ["pytest>=7", "readme_renderer[md]>=40"]
+
+[project.scripts]
+auto-label = "auto_label.cli:main"
+
+[project.urls]
+Homepage = "https://pypi.org/project/auto-label/"
+Author = "https://pypi.org/user/pranaymahendrakar/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/auto_label"]

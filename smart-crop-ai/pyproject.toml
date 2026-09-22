@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "smart-crop-ai"
+version = "0.1.0"
+description = "Crop to the interesting part of an image instead of the middle of it"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Pranay Mahendrakar" }]
+keywords = [
+  "crop",
+  "cropping",
+  "smart-crop",
+  "thumbnail",
+  "saliency",
+  "entropy",
+  "aspect-ratio",
+  "image-processing",
+  "pillow",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Multimedia :: Graphics",
+]
+dependencies = [
+  "numpy>=1.23",
+  "Pillow>=9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+smart-crop-ai = "smart_crop_ai.cli:main"
+
+[project.urls]
+Homepage = "https://pypi.org/project/smart-crop-ai/"
+Author = "https://pypi.org/user/pranaymahendrakar/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/smart_crop_ai"]

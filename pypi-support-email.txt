@@ -1,0 +1,42 @@
+To: support@pypi.org
+Subject: 429 on new project creation - publishing a multi-package library suite
+
+Hello,
+
+My account (pranaymahendrakar) is receiving HTTP 429 "Too Many Requests" on every
+upload that would create a new project. This started after I published four new
+projects on 21 September 2026 and has continued for over 24 hours, across attempts
+spread through the following day.
+
+Authentication itself is fine: a request to the upload endpoint with an incomplete
+body returns 400, so the API token is valid and the account is not otherwise blocked.
+The 429 appears only when the upload would create a new project name.
+
+Some context on what I am doing, in case it explains the pattern that triggered this.
+I am publishing a suite of small, single-purpose Python libraries for data quality and
+machine-learning tooling. Each one is a real, independently useful package with its own
+test suite, documentation and command line interface, not a placeholder or a name
+reservation. The four already published are:
+
+  dataset-health, near-dupes, synthetic-tabular, data-drift-lite
+
+I have a further set built and tested, ready to publish at whatever rate you consider
+reasonable. I am in no hurry and I would much rather publish slowly within your limits
+than trip an abuse control.
+
+Three questions:
+
+1. Is there a new-project creation limit on my account, and if so what is the window?
+2. Is there a rate you would prefer I publish at? I already space uploads and stop on
+   the first 429 rather than retrying, and I am happy to slow down further.
+3. I have connected my GitHub account and can move to trusted publishing with pending
+   publishers. My understanding is that this changes only how I authenticate and would
+   not affect a project-creation limit, so I have not set it up expecting it to help
+   here. Is that right? I am happy to move to trusted publishing on its own merits
+   either way, and would rather set it up correctly than use it to work around a limit.
+
+Thank you for maintaining PyPI.
+
+Pranay Mahendrakar
+u6950022328@gmail.com
+https://pypi.org/user/pranaymahendrakar/

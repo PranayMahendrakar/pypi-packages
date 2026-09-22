@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "document-quality"
+version = "0.1.0"
+description = "Decide whether a scanned page is good enough to OCR before you spend money OCRing it"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Pranay Mahendrakar" }]
+keywords = [
+  "ocr",
+  "scan",
+  "document",
+  "image-quality",
+  "deskew",
+  "skew",
+  "preflight",
+  "sharpness",
+  "show-through",
+  "pillow",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Multimedia :: Graphics",
+  "Topic :: Text Processing",
+]
+dependencies = [
+  "numpy>=1.23",
+  "Pillow>=9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+document-quality = "document_quality.cli:main"
+
+[project.urls]
+Homepage = "https://pypi.org/project/document-quality/"
+Author = "https://pypi.org/user/pranaymahendrakar/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/document_quality"]

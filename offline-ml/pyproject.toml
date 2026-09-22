@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "offline-ml"
+version = "0.1.0"
+description = "Detect the machine you are on and pick a model configuration that will actually fit and run"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Pranay Mahendrakar" }]
+keywords = [
+  "hardware-detection",
+  "model-selection",
+  "gpu",
+  "vram",
+  "local-llm",
+  "offline",
+  "edge",
+  "psutil",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "psutil>=5.9",
+]
+
+[project.optional-dependencies]
+# heavy or niche deps go here, never in `dependencies`
+dev = ["pytest>=7"]
+
+[project.scripts]
+offline-ml = "offline_ml.cli:main"
+
+[project.urls]
+Homepage = "https://pypi.org/project/offline-ml/"
+Author = "https://pypi.org/user/pranaymahendrakar/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/offline_ml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

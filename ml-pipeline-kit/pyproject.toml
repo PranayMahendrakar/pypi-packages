@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ml-pipeline-kit"
+version = "0.1.0"
+description = "Build a preprocess, predict, validate and log pipeline in a few lines, with every step checked"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Pranay Mahendrakar" }]
+keywords = [
+  "pipeline",
+  "machine-learning",
+  "preprocessing",
+  "validation",
+  "data-quality",
+  "inference",
+  "logging",
+  "pandas",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "pandas>=1.5",
+  "numpy>=1.23",
+]
+
+[project.optional-dependencies]
+# heavy or niche deps go here, never in `dependencies`
+parquet = ["pyarrow>=12"]
+dev = ["pytest>=7", "pyarrow>=12"]
+
+[project.scripts]
+ml-pipeline-kit = "ml_pipeline_kit.cli:main"
+
+[project.urls]
+Homepage = "https://pypi.org/project/ml-pipeline-kit/"
+Author = "https://pypi.org/user/pranaymahendrakar/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ml_pipeline_kit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

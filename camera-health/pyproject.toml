@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "camera-health"
+version = "0.1.0"
+description = "Detect an obstructed, defocused, dark, frozen or tampered camera from its own frames"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Pranay Mahendrakar" }]
+keywords = [
+  "camera-health",
+  "camera-monitoring",
+  "obstruction-detection",
+  "tamper-detection",
+  "frozen-frame",
+  "defocus",
+  "video-quality",
+  "cctv",
+  "computer-vision",
+  "diagnostics",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Image Processing",
+  "Topic :: Multimedia :: Video",
+  "Topic :: System :: Monitoring",
+]
+dependencies = [
+  "numpy>=1.23",
+  "Pillow>=9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+camera-health = "camera_health.cli:main"
+
+[project.urls]
+Homepage = "https://pypi.org/project/camera-health/"
+Author = "https://pypi.org/user/pranaymahendrakar/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/camera_health"]

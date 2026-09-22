@@ -1,0 +1,30 @@
+# Virtual environments and scratch space used while building. Never committed:
+# they are large, machine-specific, and rebuilt from pyproject.toml anyway.
+_venvs/
+_proof/
+.venv*/
+
+# Build output. Wheels are built by the release workflow from this source, so a
+# wheel in git could silently differ from the code beside it.
+dist/
+build/
+*.egg-info/
+src/*.egg-info/
+
+# Python noise
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local verification state, not source
+verify_results.json
+publish-log.txt
+published.json
+
+# Credentials. None of these belong here, and this line is the backstop.
+.pypirc
+.env
+*.pem
+*.key

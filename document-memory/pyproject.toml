@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "document-memory"
+version = "0.1.0"
+description = "Give an application a persistent, searchable memory of documents and conversations"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Pranay Mahendrakar" }]
+keywords = [
+  "memory",
+  "retrieval",
+  "bm25",
+  "search",
+  "sqlite",
+  "embeddings",
+  "rag",
+  "chat-history",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Text Processing :: Indexing",
+  "Topic :: Database :: Database Engines/Servers",
+]
+dependencies = [
+  "numpy>=1.23",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+document-memory = "document_memory.cli:main"
+
+[project.urls]
+Homepage = "https://pypi.org/project/document-memory/"
+Author = "https://pypi.org/user/pranaymahendrakar/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/document_memory"]

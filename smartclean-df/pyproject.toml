@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "smartclean-df"
+version = "0.1.0"
+description = "Automatically detects and fixes missing values, duplicates, outliers, inconsistent formats and dirty columns in tabular data"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Pranay Mahendrakar" }]
+keywords = [
+  "pandas",
+  "data-cleaning",
+  "missing-values",
+  "outliers",
+  "duplicates",
+  "dataframe",
+  "preprocessing",
+  "etl",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "pandas>=1.5",
+  "numpy>=1.23",
+]
+
+[project.optional-dependencies]
+# heavy or niche deps go here, never in `dependencies`
+parquet = ["pyarrow>=12"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+smartclean-df = "smartclean_df.cli:main"
+
+[project.urls]
+Homepage = "https://pypi.org/project/smartclean-df/"
+Author = "https://pypi.org/user/pranaymahendrakar/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/smartclean_df"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+  "error::UserWarning",
+  "error::FutureWarning",
+  "error::RuntimeWarning",
+]

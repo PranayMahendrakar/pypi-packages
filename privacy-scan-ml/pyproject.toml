@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "privacy-scan-ml"
+version = "0.1.0"
+description = "Find personal data in datasets before it leaks into models: emails, phones, Aadhaar, PAN, cards, IPs, addresses and more"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Pranay Mahendrakar" }]
+keywords = [
+  "pii",
+  "privacy",
+  "personal-data",
+  "data-masking",
+  "anonymization",
+  "gdpr",
+  "dpdp",
+  "aadhaar",
+  "pandas",
+  "machine-learning",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "pandas>=1.5",
+  "numpy>=1.23",
+]
+
+[project.optional-dependencies]
+# heavy or niche deps go here, never in `dependencies`
+parquet = ["pyarrow>=12"]
+dev = ["pytest>=7", "pyarrow>=12"]
+
+[project.scripts]
+privacy-scan-ml = "privacy_scan_ml.cli:main"
+
+[project.urls]
+Homepage = "https://pypi.org/project/privacy-scan-ml/"
+Author = "https://pypi.org/user/pranaymahendrakar/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/privacy_scan_ml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

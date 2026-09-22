@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "image-quality-ai"
+version = "0.1.0"
+description = "Detect blur, darkness, overexposure, noise, low contrast and bad framing in photos before they reach a model"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Pranay Mahendrakar" }]
+keywords = [
+  "image-quality",
+  "blur-detection",
+  "sharpness",
+  "exposure",
+  "noise",
+  "contrast",
+  "framing",
+  "dataset-quality",
+  "computer-vision",
+  "preprocessing",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Image Processing",
+  "Topic :: Multimedia :: Graphics",
+]
+dependencies = [
+  "numpy>=1.23",
+  "Pillow>=9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+image-quality-ai = "image_quality_ai.cli:main"
+
+[project.urls]
+Homepage = "https://pypi.org/project/image-quality-ai/"
+Author = "https://pypi.org/user/pranaymahendrakar/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/image_quality_ai"]

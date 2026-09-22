@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "machine-health"
+version = "0.1.0"
+description = "A single continuously updated 0-100 health score per machine, combining many sensors and rules"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Pranay Mahendrakar" }]
+keywords = [
+  "machine-health",
+  "condition-monitoring",
+  "predictive-maintenance",
+  "sensors",
+  "telemetry",
+  "anomaly-detection",
+  "iot",
+  "time-series",
+  "pandas",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "pandas>=1.5",
+  "numpy>=1.23",
+]
+
+[project.optional-dependencies]
+parquet = ["pyarrow>=12"]
+dev = ["pytest>=7", "pyarrow>=12"]
+
+[project.scripts]
+machine-health = "machine_health.cli:main"
+
+[project.urls]
+Homepage = "https://pypi.org/project/machine-health/"
+Author = "https://pypi.org/user/pranaymahendrakar/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/machine_health"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

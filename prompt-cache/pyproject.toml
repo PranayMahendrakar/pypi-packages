@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "prompt-cache"
+version = "0.1.0"
+description = "Cache LLM responses on disk so repeated prompts cost nothing and return instantly"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Pranay Mahendrakar" }]
+keywords = [
+  "llm",
+  "cache",
+  "prompt",
+  "memoize",
+  "sqlite",
+  "openai",
+  "cost",
+  "offline",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+prompt-cache = "prompt_cache.cli:main"
+
+[project.urls]
+Homepage = "https://pypi.org/project/prompt-cache/"
+Author = "https://pypi.org/user/pranaymahendrakar/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/prompt_cache"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

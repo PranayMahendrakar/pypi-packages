@@ -1,0 +1,97 @@
+name: Publish one package to PyPI
+
+# One package per run, chosen when you start it.
+#
+# Deliberately not a matrix over every package. PyPI throttles how quickly one
+# account may create new projects, and firing thirty uploads at once is exactly
+# the pattern that throttle exists to stop. Releasing one at a time also means a
+# bad build affects one package rather than all of them.
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Directory name of the package to publish, e.g. dataset-health"
+        required: true
+        type: string
+      dry_run:
+        description: "Build and check only. Nothing is uploaded."
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Confirm the package exists
+        run: |
+          if [ ! -f "${{ inputs.package }}/pyproject.toml" ]; then
+            echo "::error::no pyproject.toml in '${{ inputs.package }}' - check the directory name"
+            ls -d */ | grep -v '^_' | sed 's|/$||' | sed 's/^/  /'
+            exit 1
+          fi
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade build twine
+
+      - name: Run the package's own tests against an installed copy
+        working-directory: ${{ inputs.package }}
+        run: |
+          python -m pip install ".[dev]" || python -m pip install . pytest
+          # Run from a directory that does not contain src/, so the tests exercise
+          # the INSTALLED package rather than the source tree beside them.
+          mkdir -p /tmp/run && cp -r tests /tmp/run/ 2>/dev/null || true
+          for extra in README.md pyproject.toml; do
+            [ -f "$extra" ] && cp "$extra" /tmp/run/
+          done
+          cd /tmp/run && python -m pytest -q tests
+
+      - name: Build the distributions
+        working-directory: ${{ inputs.package }}
+        run: |
+          rm -rf dist
+          python -m build
+
+      - name: Check the metadata
+        working-directory: ${{ inputs.package }}
+        run: python -m twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: ${{ inputs.package }}/dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # The OIDC token PyPI exchanges for upload rights. This is the whole point:
+      # no API token is stored in this repository or on anyone's machine.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # No password or token: the action exchanges the workflow's OIDC identity
+          # for a short-lived upload credential, which PyPI grants because a trusted
+          # publisher for this package names this repository and this workflow file.
+          print-hash: true

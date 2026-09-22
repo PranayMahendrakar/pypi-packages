@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "multilingual-text"
+version = "0.1.0"
+description = "Detect language, normalise and transliterate text, with one consistent API"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Pranay Mahendrakar" }]
+keywords = [
+  "language-detection",
+  "unicode",
+  "normalization",
+  "transliteration",
+  "romanization",
+  "script-detection",
+  "nlp",
+  "i18n",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Text Processing :: Linguistic",
+  "Natural Language :: English",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+multilingual-text = "multilingual_text.cli:main"
+
+[project.urls]
+Homepage = "https://pypi.org/project/multilingual-text/"
+Author = "https://pypi.org/user/pranaymahendrakar/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/multilingual_text"]

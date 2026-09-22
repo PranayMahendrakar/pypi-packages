@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dataset-health"
+version = "0.1.0"
+description = "One-call health report for any CSV or Parquet dataset: missingness, imbalance, leakage, anomalies, correlations"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Pranay Mahendrakar" }]
+keywords = [
+  "data-quality",
+  "dataset",
+  "eda",
+  "pandas",
+  "leakage",
+  "missing-values",
+  "class-imbalance",
+  "outliers",
+  "machine-learning",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "pandas>=1.5",
+  "numpy>=1.23",
+]
+
+[project.optional-dependencies]
+parquet = ["pyarrow>=12"]
+dev = ["pytest>=7", "pyarrow>=12"]
+
+[project.scripts]
+dataset-health = "dataset_health.cli:main"
+
+[project.urls]
+Homepage = "https://pypi.org/project/dataset-health/"
+Author = "https://pypi.org/user/pranaymahendrakar/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dataset_health"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

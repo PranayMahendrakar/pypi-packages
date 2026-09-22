@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "quality-predictor"
+version = "0.1.0"
+description = "Predict product quality from manufacturing parameters before final inspection, and see which settings drive it"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Pranay Mahendrakar" }]
+keywords = [
+  "quality-control",
+  "manufacturing",
+  "process-parameters",
+  "predictive-quality",
+  "defect-prediction",
+  "feature-importance",
+  "partial-dependence",
+  "scikit-learn",
+  "machine-learning",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Manufacturing",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "pandas>=1.5",
+  "numpy>=1.23",
+  "scikit-learn>=1.1",
+]
+
+[project.optional-dependencies]
+parquet = ["pyarrow>=12"]
+dev = ["pytest>=7", "pyarrow>=12"]
+
+[project.scripts]
+quality-predictor = "quality_predictor.cli:main"
+
+[project.urls]
+Homepage = "https://pypi.org/project/quality-predictor/"
+Author = "https://pypi.org/user/pranaymahendrakar/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/quality_predictor"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

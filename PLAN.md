@@ -1,0 +1,55 @@
+# 50-package programme - status and plan
+
+## Why batches of five, one workflow at a time
+Agents stalled ("no progress for 180000ms") in three separate runs. The common factor was
+concurrency: a 10-package batch, and later a 5-package batch running alongside a second
+workflow. Five packages with ONE reviewer each, one workflow at a time, is what completes.
+`verify.py` is the hard gate afterwards and never stalls, so reviewer count can be halved
+without weakening the release standard.
+
+## Release gate
+Nothing reaches `approved.json` until `python verify.py <name>` passes: clean-venv install,
+README quickstart verbatim, CLI help, CLI JSON, piped non-ASCII output, and the package's own
+test suite run against the INSTALLED wheel. Domain-specific accuracy is checked by hand on top
+(PII detection rates, anomaly recall, split integrity).
+
+## Group 1 - Data and dataset intelligence (10/10 COMPLETE)
+dataset-health, near-dupes, synthetic-tabular, data-drift-lite   -> LIVE on PyPI
+auto-label, schema-guard, ml-feature-check, smartclean-df,
+dataset-splitter, privacy-scan-ml                                 -> approved, queued 17:00
+
+## Group 2 - Industrial and time series (1/7, 1 needs fixing)
+predictive-maintenance  BUILT but NOT approved: 6 open findings, incl. a blocker where one NaT
+                        in the time column reports "infinite remaining life"; RUL over-predicts
+                        4-18x on accelerating wear
+timeseries-anomaly, sensor-anomaly, machine-health, quality-predictor   partial source, stalled
+energy-analyzer-ai, production-anomaly                                  not started
+
+## Group 3 - Developer and MLOps (0/5)
+model-watchdog, model-benchmark, ml-inference-profiler, offline-ml, ml-pipeline-kit
+
+## Group 4 - NLP and LLM (0/10)
+text-quality-ai, semantic-dedup, rag-chunker, rag-quality-check, llm-router-lite, prompt-cache,
+hallucination-check, document-memory, multilingual-text, meeting-intelligence
+
+## Group 5 - Computer vision (0/10)
+vision-anomaly, image-quality-ai, smart-crop-ai, document-quality, ocr-cleaner, image-dedup-ai,
+object-counter-ai, camera-health, image-redactor, video-event-detector
+
+## Group 6 - Speech and audio (0/8)
+voice-activity-ai, audio-clean-ai, speaker-diarize-lite, voice-commands-ai, audio-anomaly,
+speech-quality, call-ai-metrics, offline-stt-router
+
+## Honest notes on three of them
+- object-counter-ai and image-redactor need a real detection model. They will be built as
+  frameworks that accept a detector the user supplies, plus a classical fallback, rather than
+  pretending numpy can detect faces.
+- speaker-diarize-lite needs speaker embeddings. Same approach: energy/spectral segmentation
+  by default, with a hook for a real embedding model.
+- image-dedup-ai overlaps near-dupes, which already handles images. It will be scoped to
+  large-scale image-only deduplication with on-disk indexing, or dropped if that is too thin.
+
+## Publishing
+`publish-daily.ps1`, Windows task "PyPI Daily Publish", daily 17:00, five per run, 90s apart,
+stops on HTTP 429. PyPI enforces a per-day cap on NEW project creation; four in one day
+exhausted it, so roughly five per day is the real ceiling regardless of how fast building goes.
