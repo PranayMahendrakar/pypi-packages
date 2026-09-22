@@ -92,6 +92,10 @@ jobs:
       # Each matrix job exchanges its own OIDC identity for upload rights to its own
       # project, so one package's failure cannot publish another's.
       id-token: write
+    env:
+      # `secrets` cannot be read inside an `if:` expression, so the presence of a
+      # token becomes a plain string flag here and the steps below branch on that.
+      HAS_TOKEN: ${{ secrets.PYPI_API_TOKEN != '' }}
     strategy:
       # Sequential on purpose. Parallel uploads are exactly the burst that trips the
       # rate limit, and fail-fast off means one bad package does not cancel the rest.
@@ -127,11 +131,28 @@ jobs:
           python -m build
           python -m twine check dist/*
 
-      - name: Publish
-        if: ${{ !inputs.dry_run }}
+      # Two ways to authenticate, and the workflow takes whichever is set up.
+      #
+      # Trusted publishing is the better one: nothing is stored anywhere and the
+      # credential lives for minutes. It needs a publisher registered on PyPI for
+      # EACH package name, because a publisher authorises one project, not an account.
+      #
+      # An API token is one setup step instead of one per package. It is encrypted at
+      # rest and never exposed to pull requests from forks, but it is a long-lived
+      # account-wide credential, so prefer trusted publishing once the names exist.
+      - name: Publish with trusted publishing
+        if: ${{ !inputs.dry_run && env.HAS_TOKEN != 'true' }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: ${{ matrix.package }}/dist/
+          print-hash: true
+
+      - name: Publish with an API token
+        if: ${{ !inputs.dry_run && env.HAS_TOKEN == 'true' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: ${{ matrix.package }}/dist/
+          password: ${{ secrets.PYPI_API_TOKEN }}
           print-hash: true
 
       - name: Say what happened

@@ -1,4 +1,4 @@
-# Trusted publishing setup
+# Release authentication
 
 Releases use PyPI trusted publishing. GitHub Actions proves its identity to PyPI with a
 short-lived OpenID Connect token, and PyPI grants upload rights for that one package.
@@ -46,3 +46,37 @@ before anything is uploaded.
 There is no matrix over every package. PyPI limits how quickly one account may create
 new projects, and thirty simultaneous uploads is the exact pattern that limit exists to
 stop. Releasing one at a time also keeps a bad build from affecting everything at once.
+
+
+## One publisher authorises one project, not your account
+
+This catches people out. A trusted publisher grants upload rights for a single project
+name. Registering one does not cover the others, so 27 remaining names means 27
+registrations. They are quick, and every field except the project name is identical, but
+there is no way to do them in bulk: PyPI has no API for registering publishers.
+
+## If that is too much clicking
+
+`.github/workflows/publish-queue.yml` also accepts an API token, and uses it
+automatically when one is present. One setup step covers every package:
+
+1. On PyPI, Account settings, API tokens, add a token scoped to the entire account.
+   It has to be account-wide, because the projects do not exist yet and a
+   project-scoped token cannot create one.
+2. In this repository: Settings, Secrets and variables, Actions, New repository secret.
+   Name it `PYPI_API_TOKEN` and paste the token.
+
+The workflow then uses the token and skips the trusted-publishing step.
+
+### Which to choose
+
+Trusted publishing is genuinely safer. Nothing is stored, and the credential GitHub
+mints lives for minutes rather than forever. A token is a long-lived account-wide
+credential, and although GitHub encrypts secrets at rest and never exposes them to
+workflows from forked pull requests, anyone who can push to `main` here can run a
+workflow that uses it.
+
+A reasonable middle path: use the token to get the remaining packages published, then
+delete it and register ordinary publishers once each project exists. At that point the
+registration moves to each project's own settings page and the account-wide token is no
+longer needed at all.
