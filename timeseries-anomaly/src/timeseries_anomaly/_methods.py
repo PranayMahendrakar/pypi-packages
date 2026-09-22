@@ -189,7 +189,11 @@ def _neighbour_baseline(values: np.ndarray, size: int) -> np.ndarray:
     full = (behind >= radius) & (ahead >= radius) & behind_ok & ahead_ok
     with np.errstate(over="ignore", invalid="ignore"):
         raw = np.where(full, (ahead_median - behind_median) / float(radius + 1), np.nan)
-    slope = pd.Series(raw).ffill().bfill().fillna(0.0).to_numpy(dtype=float)
+    # copy=True is not optional: with pandas copy-on-write, the default in pandas 3,
+    # to_numpy() hands back a read-only view of the Series' own buffer, and the next
+    # line writes into it. Without the copy this raises "assignment destination is
+    # read-only" for every caller on a current pandas.
+    slope = pd.Series(raw).ffill().bfill().fillna(0.0).to_numpy(dtype=float, copy=True)
     slope[~np.isfinite(slope)] = 0.0
     with np.errstate(over="ignore", invalid="ignore"):
         from_behind = np.where(behind_ok, behind_median, 0.0) + slope * (behind + 1.0) / 2.0

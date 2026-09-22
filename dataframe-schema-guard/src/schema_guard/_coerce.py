@@ -80,7 +80,13 @@ def null_column(spec: "ColumnSpec", length: int) -> pd.Series:
     elif family == "datetime":
         # A filled-in column must carry the schema's timezone too, or a batch missing the
         # column would come out with a different dtype from one that has it.
-        dtype: Any = "datetime64[ns]" if spec.tz is None else pd.DatetimeTZDtype(tz=spec.tz)
+        # The unit is pinned deliberately. pd.DatetimeTZDtype(tz=...) takes its unit
+        # from the pandas default, which is nanoseconds on pandas 2 and microseconds
+        # on pandas 3 - so the same schema enforced on two machines produced columns
+        # that would not concat, which is the one thing this package exists to prevent.
+        dtype: Any = (
+            "datetime64[ns]" if spec.tz is None else pd.DatetimeTZDtype(unit="ns", tz=spec.tz)
+        )
         out = pd.Series(pd.array([pd.NaT] * length, dtype=dtype))
     elif family == "category":
         out = pd.Series(pd.Categorical([np.nan] * length, categories=spec.categories or []))
