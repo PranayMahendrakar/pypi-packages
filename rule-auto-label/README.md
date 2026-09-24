@@ -1,11 +1,14 @@
-# auto-label
+# rule-auto-label
+
+> Installs as `rule-auto-label`; imports as `auto_label`. PyPI blocks the plain
+> name `auto-label` as too close to the existing `autolabel` and `auto-labeler`.
 
 Turn a few keyword, regex or query rules into labels for a whole text list or DataFrame: rules label what they can, a small model trained on those labels covers the rest, and an optional LLM callable takes the items nobody was sure about.
 
 ## Install
 
 ```bash
-pip install auto-label
+pip install rule-auto-label
 ```
 
 ## Quickstart
@@ -45,7 +48,7 @@ The last two items match no rule; the model trained on the first six labels them
   the error is logged and the item stays as it was.
 - **Anything else is left `None`.** `coverage` tells you how much was labeled.
 - Text input: `list[str]`, a pandas `Series`, or a 1-D array. Tabular input: a `DataFrame`, a dict of
-  columns, or a path to `.csv` / `.parquet` (`pip install auto-label[parquet]`). On tables, keyword and
+  columns, or a path to `.csv` / `.parquet` (`pip install rule-auto-label[parquet]`). On tables, keyword and
   regex rules see the string-like columns of each row joined by spaces; `func` gets the row as a
   Series, whose `.name` is that row's label in your index.
 - Deterministic (`random_state`), no network, no model downloads, logs through `logging`.
@@ -96,7 +99,7 @@ auto-label orders.csv --query big="amount > 100" --rules more_rules.json --outpu
 one item per line, or `-` for stdin. Repeat `--rule LABEL=kw1,kw2`, `--regex LABEL=PATTERN` and
 `--query LABEL=EXPR` as needed, or put the same rules in a JSON file for `--rules`. By default the
 summary is printed; `--json` prints `to_dict()`; `--output PATH` writes the labeled table as `.csv`
-or `.parquet` (`pip install auto-label[parquet]`), or the full result as `.json`. For tabular input
+or `.parquet` (`pip install rule-auto-label[parquet]`), or the full result as `.json`. For tabular input
 the written table is the input columns plus `label, confidence, source`, so it joins back to the
 source file; if the input already uses one of those names, or `index`, the written column gets a free
 one (`label_2`, `index_2`) so every header stays unique. The destination is replaced only once the

@@ -3,7 +3,7 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
-name = "auto-label"
+name = "rule-auto-label"
 version = "0.1.0"
 description = "Generate labels for text or tabular data from rules, then extend them with a lightweight ML model and an optional LLM hook"
 readme = "README.md"
@@ -35,10 +35,10 @@ parquet = ["pyarrow>=12"]
 dev = ["pytest>=7", "readme_renderer[md]>=40"]
 
 [project.scripts]
-auto-label = "auto_label.cli:main"
+rule-auto-label = "auto_label.cli:main"
 
 [project.urls]
-Homepage = "https://pypi.org/project/auto-label/"
+Homepage = "https://pypi.org/project/rule-auto-label/"
 Author = "https://pypi.org/user/pranaymahendrakar/"
 
 [tool.hatch.build.targets.wheel]

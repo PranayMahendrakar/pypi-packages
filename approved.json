@@ -1,8 +1,6 @@
 [
-  "auto-label",
-  "dataframe-schema-guard",
+  "rule-auto-label",
   "timeseries-anomaly",
-  "machine-health",
   "quality-predictor",
   "energy-analyzer-ai",
   "sensor-anomaly",

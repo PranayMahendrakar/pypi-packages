@@ -33,4 +33,6 @@ def test_readme_section_order():
     text = README.read_text(encoding="utf-8")
     headings = re.findall(r"^## (.+)$", text, re.M)
     assert headings == ["Install", "Quickstart", "What it does", "API", "CLI", "License"]
-    assert text.startswith("# auto-label\n")
+    # The distribution is rule-auto-label; the import name stays auto_label.
+    # PyPI blocks the plain name as too close to 'autolabel' and 'auto-labeler'.
+    assert text.startswith("# rule-auto-label\n")

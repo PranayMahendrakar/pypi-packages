@@ -91,15 +91,15 @@ def _as_time_key(raw: Any, name: str, warnings: List[str]) -> Optional[np.ndarra
     """Best effort conversion of a column or index into a sortable time axis."""
     series = pd.Series(raw)
     if pd.api.types.is_datetime64_any_dtype(series):
-        return series.to_numpy()
+        return series.to_numpy(copy=True)
     if pd.api.types.is_numeric_dtype(series):
-        return series.to_numpy()
+        return series.to_numpy(copy=True)
     parsed = pd.to_datetime(series, errors="coerce")
     if bool(parsed.notna().any()):
         unreadable = int(parsed.isna().sum())
         if unreadable:
             warnings.append(f"{unreadable} timestamp(s) in {name!r} could not be read and sort last")
-        return parsed.to_numpy()
+        return parsed.to_numpy(copy=True)
     return None
 
 
@@ -132,7 +132,7 @@ def _looks_like_time(column: pd.Series) -> Optional[np.ndarray]:
         return None
     if parsed[readable].nunique() < 2:
         return None
-    return parsed.to_numpy()
+    return parsed.to_numpy(copy=True)
 
 
 def _pick_time_column(
@@ -151,7 +151,7 @@ def _pick_time_column(
         return str(time), key
     for column in frame.columns:
         if pd.api.types.is_datetime64_any_dtype(frame[column]):
-            return str(column), frame[column].to_numpy()
+            return str(column), frame[column].to_numpy(copy=True)
     for column in frame.columns:
         if str(column).strip().lower() in TIME_NAMES:
             key = _as_time_key(frame[column], str(column), warnings)
@@ -161,7 +161,7 @@ def _pick_time_column(
     if isinstance(index, pd.PeriodIndex):
         index = index.to_timestamp()
     if isinstance(index, pd.DatetimeIndex):
-        return str(index.name or "time"), index.to_numpy()
+        return str(index.name or "time"), index.to_numpy(copy=True)
     for column in frame.columns:
         if pd.api.types.is_numeric_dtype(frame[column]):
             continue
@@ -226,7 +226,7 @@ def _from_frame(
         )
     time_label, time_key = _pick_time_column(frame, time, warnings)
     value_label = _pick_value_column(frame, value, time_label, warnings)
-    values = as_float_array(frame[value_label].to_numpy())
+    values = as_float_array(frame[value_label].to_numpy(copy=True))
     return _finish(
         values, time_key, value_label, time_label, warnings, index=frame.index
     )
@@ -306,14 +306,14 @@ def load(data: Any, value: Optional[str] = None, time: Optional[str] = None) -> 
         return _from_frame(_frame_from_dict(data), value, time, warnings)
     if isinstance(data, pd.Series):
         label = str(data.name) if data.name is not None else (str(value) if value else "value")
-        values = as_float_array(data.to_numpy())
+        values = as_float_array(data.to_numpy(copy=True))
         index = data.index
         if isinstance(index, pd.PeriodIndex):
             index = index.to_timestamp()
         if isinstance(index, pd.DatetimeIndex):
             return _finish(
                 values,
-                index.to_numpy(),
+                index.to_numpy(copy=True),
                 label,
                 str(index.name or "time"),
                 warnings,
@@ -321,7 +321,7 @@ def load(data: Any, value: Optional[str] = None, time: Optional[str] = None) -> 
             )
         return _finish(values, None, label, None, warnings, index=data.index)
     if isinstance(data, pd.Index):
-        return _finish(as_float_array(data.to_numpy()), None, str(value or "value"), None, warnings)
+        return _finish(as_float_array(data.to_numpy(copy=True)), None, str(value or "value"), None, warnings)
     if isinstance(data, (list, tuple, np.ndarray, range)):
         array = np.asarray(list(data) if isinstance(data, range) else data)
         if array.ndim == 2 and array.shape[1] == 1:

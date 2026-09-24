@@ -1,4 +1,12 @@
-"""The baselines a point can be compared against.
+"""
+# NOTE: every .to_numpy() in this package asks for copy=True.
+#
+# Under pandas copy-on-write - the default from pandas 3 - to_numpy() returns a
+# READ-ONLY view of the Series' own buffer, and this module writes into those arrays
+# constantly. Without the copy, 52 of these tests fail with "assignment destination is
+# read-only" on any current pandas, while passing on pandas 2. The arrays here are one
+# column of a time series, so the copy costs nothing worth measuring.
+The baselines a point can be compared against.
 
 Each fitter answers one question: "what should this point have been?". It returns
 a :class:`Baseline` holding that expectation for every point, the robust scale the
@@ -84,7 +92,7 @@ def infer_period(time: Optional[np.ndarray], n: int) -> Optional[int]:
     stamps = stamps.dropna().sort_values()
     if len(stamps) < 4:
         return None
-    deltas = stamps.diff().dropna().dt.total_seconds().to_numpy()
+    deltas = stamps.diff().dropna().dt.total_seconds().to_numpy(copy=True)
     deltas = deltas[np.isfinite(deltas) & (deltas > 0.0)]
     if deltas.size == 0:
         return None
@@ -171,14 +179,14 @@ def _neighbour_baseline(values: np.ndarray, size: int) -> np.ndarray:
     radius = max(1, int(size) // 2)
     trusted = min(MIN_TRUSTED_SIDE, radius)
     behind_median = (
-        pd.Series(values).rolling(radius, min_periods=1).median().shift(1).to_numpy(dtype=float)
+        pd.Series(values).rolling(radius, min_periods=1).median().shift(1).to_numpy(dtype=float, copy=True)
     )
     ahead_median = (
         pd.Series(values[::-1])
         .rolling(radius, min_periods=1)
         .median()
         .shift(1)
-        .to_numpy(dtype=float)[::-1]
+        .to_numpy(dtype=float, copy=True)[::-1]
     )
     behind = np.minimum(np.arange(n), radius).astype(float)
     ahead = np.minimum(np.arange(n - 1, -1, -1), radius).astype(float)
@@ -334,7 +342,7 @@ def _ewma_expected(values: np.ndarray, width: int) -> Tuple[np.ndarray, np.ndarr
     if values.size >= 3:
         guarded.iloc[:2] = _nan_median(np.asarray(values, dtype=float)[:3], float(guarded.iloc[0]))
     smoothed = guarded.ewm(span=width, adjust=False, ignore_na=True).mean()
-    expected = smoothed.shift(1).to_numpy(dtype=float)
+    expected = smoothed.shift(1).to_numpy(dtype=float, copy=True)
     if values.size > 1:
         backward = (
             pd.Series(np.asarray(values, dtype=float)[::-1])
@@ -342,10 +350,10 @@ def _ewma_expected(values: np.ndarray, width: int) -> Tuple[np.ndarray, np.ndarr
             .median()
             .ewm(span=width, adjust=False, ignore_na=True)
             .mean()
-            .to_numpy(dtype=float)[::-1]
+            .to_numpy(dtype=float, copy=True)[::-1]
         )
         expected[0] = backward[1]
-    return expected, smoothed.to_numpy(dtype=float)
+    return expected, smoothed.to_numpy(dtype=float, copy=True)
 
 
 def fit_ewma(values: np.ndarray, span: Optional[int] = None) -> Baseline:
@@ -406,7 +414,7 @@ def _cycle_trend(values: np.ndarray, period: int, level: float) -> np.ndarray:
     would see only part of the season and drag the baseline away from the data.
     """
     rolled = pd.Series(values).rolling(period, center=True, min_periods=period).median()
-    return _fill(rolled.ffill().bfill().to_numpy(dtype=float), level)
+    return _fill(rolled.ffill().bfill().to_numpy(dtype=float, copy=True), level)
 
 
 def _phase_grid(detrended: np.ndarray, period: int) -> np.ndarray:
