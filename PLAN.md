@@ -79,3 +79,20 @@ rate limit, because one needs a rename and the other needs patience.
 
 Any remaining name could hit the same rule. It surfaces immediately and harmlessly on
 the first upload attempt, so the plan is to handle each as it appears rather than guess.
+
+## The publishing window, measured
+
+    21 Sep ~19:00 IST   4 published, then 429
+    22 Sep ~20:00 IST   4 published, then 429
+    23 Sep  11:40 UTC   scheduled run: 429 on all four, ~21 hours after the last success
+    24 Sep              retry cadence raised to every 4 hours to find the real edge
+
+So the window is longer than 21 hours and is not a simple daily reset. Guessing at it
+one attempt a day learns almost nothing, so the workflow now tries six times a day. Each
+run skips anything already on PyPI, so a wasted attempt costs a build and nothing else.
+
+A rate limit no longer fails the run. It is an expected condition while the window is
+shut, and marking it red six times a day would train everyone to ignore the signal. The
+run asks PyPI afterwards whether the package actually landed and reports that instead.
+A genuine problem - a failing test, or a name rejected as too similar to an existing
+project - still fails loudly.

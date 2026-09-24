@@ -11,9 +11,16 @@ name: Publish the next few from the queue
 
 on:
   schedule:
-    # 06:20 UTC daily. Deliberately not on the hour: scheduled runs cluster there and
-    # GitHub delays them under load.
-    - cron: "20 6 * * *"
+    # Every four hours rather than once a day, because we do not actually know how long
+    # PyPI's new-project window is. Measured so far: four published on 21 Sep, four on
+    # 22 Sep, and a run 21 hours after the last of those still got 429. A daily attempt
+    # tells us almost nothing; six attempts a day finds the edge and publishes the
+    # moment the window opens.
+    #
+    # Retrying is cheap and safe: each run skips anything already on PyPI, so the worst
+    # case is a build that uploads nothing. Minutes past the hour are staggered off the
+    # hour because scheduled jobs cluster there and GitHub delays them under load.
+    - cron: "20 2,6,10,14,18,22 * * *"
   workflow_dispatch:
     inputs:
       max_packages:
@@ -141,6 +148,8 @@ jobs:
       # rest and never exposed to pull requests from forks, but it is a long-lived
       # account-wide credential, so prefer trusted publishing once the names exist.
       - name: Publish with trusted publishing
+        id: publish_oidc
+        continue-on-error: true
         if: ${{ !inputs.dry_run && env.HAS_TOKEN != 'true' }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
@@ -148,6 +157,8 @@ jobs:
           print-hash: true
 
       - name: Publish with an API token
+        id: publish_token
+        continue-on-error: true
         if: ${{ !inputs.dry_run && env.HAS_TOKEN == 'true' }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
@@ -155,13 +166,21 @@ jobs:
           password: ${{ secrets.PYPI_API_TOKEN }}
           print-hash: true
 
-      - name: Say what happened
-        if: ${{ always() }}
+      - name: Did it actually land?
+        if: ${{ !inputs.dry_run }}
         shell: bash
         run: |
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "- ${{ matrix.package }}: published" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "- ${{ matrix.package }}: FAILED - check whether PyPI said 429 (wait, it refills daily)" >> "$GITHUB_STEP_SUMMARY"
-            echo "  or 'name too similar to an existing project' (rename it; retrying will never work)" >> "$GITHUB_STEP_SUMMARY"
+          # Ask PyPI rather than trusting the step's exit code. A 429 means "not yet",
+          # which is an ordinary outcome while the window is closed, and failing the run
+          # for it would cry wolf six times a day. Anything else is a real problem.
+          sleep 15
+          code=$(curl -s -o /dev/null -w '%{http_code}'                  "https://pypi.org/pypi/${{ matrix.package }}/json")
+          if [ "$code" = "200" ]; then
+            echo "- ${{ matrix.package }}: PUBLISHED" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
+          outcome="${{ steps.publish_token.outcome }}${{ steps.publish_oidc.outcome }}"
+          echo "- ${{ matrix.package }}: not published this run (upload step: $outcome)" >> "$GITHUB_STEP_SUMMARY"
+          echo "  Usually PyPI's new-project rate limit. The next run in four hours retries." >> "$GITHUB_STEP_SUMMARY"
+          echo "  If it never lands, read the upload log: a name rejected as 'too similar to an" >> "$GITHUB_STEP_SUMMARY"
+          echo "  existing project' needs renaming and will never succeed on retry." >> "$GITHUB_STEP_SUMMARY"
