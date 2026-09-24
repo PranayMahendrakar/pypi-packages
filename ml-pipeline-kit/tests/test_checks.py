@@ -101,7 +101,10 @@ def test_schema_names_a_missing_column_and_a_wrong_dtype():
     result = Pipeline().expect_schema({"age": "int", "city": "str"}).run(data)
     assert not result.ok
     message = result.failures[0]
-    assert "column 'age' has dtype object, expected int" in message
+    # The dtype name is pandas', not ours: a column of strings is "object" on pandas 2
+    # and "str" on pandas 3. Asserting the spelling tests pandas, so assert the contract
+    # instead - which column, and what was expected.
+    assert "column 'age' has dtype" in message and "expected int" in message
     assert "column 'city' is missing" in message
 
 
@@ -230,7 +233,11 @@ def test_range_calls_a_date_or_duration_a_type_problem_not_a_big_number(column, 
     result = Pipeline().expect_range("d", 0, 10).run(pd.DataFrame({"d": column}))
     assert not result.ok
     detail = result.failures[0]
-    assert "column 'd' is not numeric (dtype {0})".format(label) in detail
+    # Likewise the resolution: pandas 2 says datetime64[ns], pandas 3 says
+    # datetime64[us], and a timedelta comes back as [s]. The point of the check is that
+    # a date is refused as non-numeric, not how pandas spells its dtype today.
+    assert "column 'd' is not numeric (dtype" in detail
+    assert label.split("[")[0] in detail
     assert "above 10" not in detail
 
 

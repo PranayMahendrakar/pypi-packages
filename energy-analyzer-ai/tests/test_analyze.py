@@ -183,3 +183,42 @@ def test_legacy_pandas_offsets_do_not_leak_a_warning():
 def test_an_hourly_alias_still_works_and_is_read_as_hourly():
     report = ea.analyze(meter(days=20, seed=4), granularity="H")
     assert report.granularity == "1h"
+
+
+def test_every_documented_granularity_is_accepted():
+    """Regression, and both halves only show up on pandas 3.
+
+    'H', 'T' and 'S' warned on pandas 2 and were removed in pandas 3, so code that had
+    worked for years started raising. And pd.Timedelta(offset) - the obvious way to ask
+    how long an offset is - refuses a Day offset on pandas 3, which broke '1D' and
+    'daily', the commonest setting for meter data. The error message even advertised
+    '1D' as valid while rejecting it.
+    """
+    import numpy as np
+    import pandas as pd
+
+    import energy_analyzer_ai as ea
+
+    index = pd.date_range("2026-01-01", periods=24 * 30, freq="h")
+    frame = pd.DataFrame(
+        {"t": index, "kwh": 10 + np.random.default_rng(0).normal(0, 1, len(index))}
+    )
+    for granularity in ("H", "h", "hourly", "30T", "30min", "1D", "D", "daily", "7D", "auto"):
+        report = ea.analyze(frame, value="kwh", time="t", granularity=granularity)
+        assert report.total > 0, granularity
+
+
+def test_a_genuinely_variable_period_is_still_refused():
+    """Months and quarters are not fixed durations, and saying so is correct."""
+    import numpy as np
+    import pandas as pd
+    import pytest
+
+    import energy_analyzer_ai as ea
+
+    index = pd.date_range("2026-01-01", periods=24 * 30, freq="h")
+    frame = pd.DataFrame(
+        {"t": index, "kwh": 10 + np.random.default_rng(0).normal(0, 1, len(index))}
+    )
+    with pytest.raises(ValueError, match="not a fixed period"):
+        ea.analyze(frame, value="kwh", time="t", granularity="1ME")

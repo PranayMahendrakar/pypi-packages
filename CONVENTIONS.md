@@ -124,3 +124,30 @@ packages = ["src/<import_name>"]
   at the entry point, never an AttributeError from inside pandas.
 - Any "auto" heuristic (auto group detection, auto target type, auto kind) must never silently
   produce an empty or degenerate result: detect it, fall back, and record a warning in the report.
+
+
+## pandas 2 and pandas 3 (added after four packages broke on 3 while passing on 2)
+
+This machine has pandas 2. The release pipeline and every user installing today have
+pandas 3. Code can pass every test here and be broken for everyone. Check any package
+that touches pandas against the pandas 3 environment before approving it:
+
+    python check_pandas3.py <name>
+
+Four traps found so far, all silent on pandas 2:
+
+- **`.to_numpy()` returns a READ-ONLY array** under copy-on-write, the pandas 3 default.
+  Writing into it raises "assignment destination is read-only". Pass `copy=True` at every
+  call site you write into - timeseries-anomaly failed 52 of its own tests this way.
+- **Datetime resolution is no longer nanoseconds.** `pd.DatetimeTZDtype(tz=...)` and
+  `pd.to_datetime` take their unit from the pandas default, so one schema produced
+  columns that would not concat. Pin the unit if you care that it is stable.
+- **Retired offset aliases.** `'H'`, `'T'`, `'S'` warned on pandas 2 and are gone in 3.
+  Translate them rather than passing them through, or user code that worked for years
+  starts raising.
+- **`pd.Timedelta(offset)` refuses a Day offset** on pandas 3. Use `offset.nanos`, which
+  answers "is this a fixed duration, and how long" correctly on both, and still refuses
+  weeks and months, which genuinely are not fixed.
+
+And in tests: never assert on a dtype's spelling. A string column is `object` on pandas 2
+and `str` on pandas 3; a timedelta is `[ns]` then `[s]`. Assert the behaviour instead.

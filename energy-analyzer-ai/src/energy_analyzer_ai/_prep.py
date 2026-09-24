@@ -40,6 +40,16 @@ LADDER: Tuple[Tuple[str, pd.Timedelta], ...] = (
 )
 
 #: friendly words accepted by ``granularity=``
+#: Offset aliases pandas 2 accepted with a warning and pandas 3 removed. A caller
+#: writing '30T' or '2H' is not wrong; their pandas changed under them.
+LEGACY_OFFSETS = {
+    "H": "h", "T": "min", "S": "s", "L": "ms", "U": "us", "N": "ns",
+    "h": "h", "min": "min", "s": "s",
+}
+for _n in range(1, 61):
+    for _old, _new in (("H", "h"), ("T", "min"), ("S", "s"), ("L", "ms"), ("U", "us")):
+        LEGACY_OFFSETS[f"{_n}{_old}"] = f"{_n}{_new}"
+
 WORDS = {
     "auto": None,
     "minute": pd.Timedelta(minutes=1),
@@ -132,16 +142,34 @@ def parse_granularity(granularity: Any) -> Optional[pd.Timedelta]:
         key = granularity.strip().lower()
         if key in WORDS:
             return WORDS[key]
-        # Legacy aliases ('H', 'T', 'S') are still accepted by to_offset but make
-        # pandas emit a FutureWarning. Reading the alias is our business, not the
-        # caller's, so the warning does not escape into their process.
+        # Legacy aliases warned on pandas 2 and were REMOVED in pandas 3, so
+        # granularity='H' - valid code for years, and still in plenty of scripts -
+        # started raising "not a fixed period" on an upgrade. They are translated
+        # here rather than passed through, so the caller's spelling keeps working
+        # whichever pandas they have.
+        spelled = LEGACY_OFFSETS.get(granularity.strip(), granularity)
         with _warnings.catch_warnings():
             _warnings.simplefilter("ignore")
             try:
-                offset = pd.tseries.frequencies.to_offset(granularity)
-                width = pd.Timedelta(offset)
+                offset = pd.tseries.frequencies.to_offset(spelled)
             except (ValueError, TypeError, AttributeError):
-                width = None
+                offset = None
+            width = None
+            if offset is not None:
+                # `.nanos` is the reliable "is this a fixed duration, and how long"
+                # question on both pandas 2 and 3. pd.Timedelta(offset) looks like the
+                # obvious call and is a trap: on pandas 3 it refuses a Day offset, so
+                # granularity='1D' and 'daily' - the commonest setting for meter data -
+                # raised "not a fixed period" on upgrade. `.nanos` still refuses weeks
+                # and months, which genuinely are not fixed durations, so the error
+                # stays correct for those.
+                try:
+                    width = pd.Timedelta(offset.nanos, unit="ns")
+                except (ValueError, TypeError, AttributeError):
+                    try:
+                        width = pd.Timedelta(offset)
+                    except (ValueError, TypeError, AttributeError):
+                        width = None
         if width is None or width <= pd.Timedelta(0):
             raise ValueError(
                 f"granularity={granularity!r} is not a fixed period; use 'auto', "
