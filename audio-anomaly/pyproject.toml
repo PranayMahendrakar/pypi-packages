@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "audio-anomaly"
+version = "0.1.0"
+description = "Detect unusual sounds in machine or environment recordings without labelled faults"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Pranay Mahendrakar" }]
+keywords = [
+  "audio-anomaly",
+  "anomaly-detection",
+  "acoustic-monitoring",
+  "condition-monitoring",
+  "predictive-maintenance",
+  "sound-event-detection",
+  "unsupervised",
+  "spectrum",
+  "wav",
+  "numpy",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Manufacturing",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Multimedia :: Sound/Audio :: Analysis",
+  "Topic :: System :: Monitoring",
+]
+dependencies = [
+  "numpy>=1.23",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+audio-anomaly = "audio_anomaly.cli:main"
+
+[project.urls]
+Homepage = "https://pypi.org/project/audio-anomaly/"
+Author = "https://pypi.org/user/pranaymahendrakar/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/audio_anomaly"]
