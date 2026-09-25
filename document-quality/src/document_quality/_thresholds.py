@@ -81,12 +81,13 @@ class Thresholds:
     hopeless_sharpness: float = 0.04
 
     # -- lighting and the reverse side ------------------------------------
-    #: Paper-level swing across the page, relative to the page's own paper
-    #: level, small enough to ignore.
+    #: Fall in the paper level from the brightest part of the page to the
+    #: darkest, as a share of the brightest, small enough to ignore.
     target_lighting: float = 0.04
-    #: Paper-level swing beyond which one part of the page is badly lit.
+    #: Fall beyond which one part of the page is badly lit. Past twice this
+    #: the lighting issue is a failure rather than a warning.
     limit_lighting: float = 0.22
-    #: Paper-level swing that scores nothing at all.
+    #: Fall that scores nothing at all.
     hopeless_lighting: float = 0.60
 
     #: Share of the page showing soft grey marks from the reverse side that is
@@ -113,9 +114,12 @@ class Thresholds:
     faint_text_coverage: float = 0.010
 
     # -- what kind of page this is ----------------------------------------
-    #: Ink-to-paper separation below which the sheet carries nothing at all.
+    #: Ink-to-paper separation below which a sheet with no rows of text in
+    #: its profile is blank. A faint sheet that does show rows of text is a
+    #: document with a contrast problem, never a blank.
     blank_contrast: float = 0.120
-    #: Share of the page that has to be inked before it is not blank.
+    #: Share of the page that has to be inked before it is not blank (again
+    #: only when the profile shows no rows of text).
     blank_ink_share: float = 0.0008
     #: Share of the page near paper white below which it is not a document.
     document_paper_share: float = 0.400
@@ -123,7 +127,7 @@ class Thresholds:
     document_line_contrast: float = 1.000
     #: Colour spread above which the page is too colourful to be ink on paper.
     document_colour_spread: float = 0.120
-    #: How many of the three document tests must fail before a page is called
+    #: How many of the four document tests must fail before a page is called
     #: a photograph rather than a document.
     document_failed_tests: int = 2
 
@@ -227,9 +231,9 @@ _DOC: Dict[str, str] = {
     "target_sharpness": "edge acutance worth full marks",
     "limit_sharpness": "acutance below which strokes are too soft",
     "hopeless_sharpness": "acutance scoring nothing at all",
-    "target_lighting": "paper-level swing small enough to ignore",
-    "limit_lighting": "swing beyond which part of the page is badly lit",
-    "hopeless_lighting": "swing scoring nothing at all",
+    "target_lighting": "fall in paper level across the page, ignorable",
+    "limit_lighting": "fall beyond which part of the page is badly lit",
+    "hopeless_lighting": "fall scoring nothing at all",
     "target_show_through": "share of page showing the reverse side, ignorable",
     "limit_show_through": "share beyond which show-through confuses OCR",
     "hopeless_show_through": "share scoring nothing at all",
@@ -238,7 +242,7 @@ _DOC: Dict[str, str] = {
     "hopeless_black_clipping": "share at pure black scoring nothing at all",
     "warn_white_clipping": "share at pure white worth a warning",
     "faint_text_coverage": "text coverage below which that warning is raised",
-    "blank_contrast": "separation below which the sheet carries nothing",
+    "blank_contrast": "separation below which a sheet with no text rows is blank",
     "blank_ink_share": "share of page inked before it is not blank",
     "document_paper_share": "share near paper white a document needs",
     "document_line_contrast": "profile swing a page of text rows needs",

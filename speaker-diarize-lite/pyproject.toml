@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "speaker-diarize-lite"
+version = "0.1.0"
+description = "Work out who spoke when in a recording, with a lightweight method or a model you supply"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Pranay Mahendrakar" }]
+keywords = [
+  "speaker-diarization",
+  "diarization",
+  "who-spoke-when",
+  "speaker-turns",
+  "rttm",
+  "speech",
+  "audio",
+  "mel-spectrogram",
+  "clustering",
+  "numpy",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Multimedia :: Sound/Audio :: Analysis",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+dependencies = [
+  "numpy>=1.23",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+speaker-diarize-lite = "speaker_diarize_lite.cli:main"
+
+[project.urls]
+Homepage = "https://pypi.org/project/speaker-diarize-lite/"
+Author = "https://pypi.org/user/pranaymahendrakar/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/speaker_diarize_lite"]

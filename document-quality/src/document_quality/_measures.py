@@ -9,10 +9,14 @@ advice it produces.
 Three ideas hold the file together.
 
 **Paper is local.** A page lit from one side has no single paper level, so the
-work plane is divided into tiles, each tile's own paper level is taken, and the
-grid is stretched back over the page. Everything downstream is measured against
-that surface rather than one number for the whole sheet, which is why uneven
-lighting does not masquerade as low contrast or as show-through.
+paper level is estimated everywhere on the page (see
+:mod:`document_quality._lighting`) and the page is divided by it before any ink
+is measured - a flat-field correction, which is what uneven light physically
+calls for, because light multiplies ink and paper alike. That is why a shadow
+along one edge is reported as a lighting gradient with a lighting fix, and not
+as low contrast, as show-through, or as a scanner border. Only genuinely black
+bands running in from the edge of the image are borders, and those are cropped
+away before anything else is measured.
 
 **Sharpness is measured against the size of the text.** Optical softness is
 roughly fixed in physical terms, so the same lens spreads an edge over twice as
@@ -21,51 +25,75 @@ the better scan. The crispness of an edge is therefore scaled by the height of
 the text it belongs to, so two scans of one sheet at different resolutions come
 out level.
 
-**A page with nothing on it is not a broken page.** Blank sheets are settled
-first, before any mask is built, both because dividing by a contrast of zero is
-meaningless and because a blank page deserves one honest sentence rather than
-eight complaints about the text it does not have.
+**A page with nothing on it is not a broken page.** A blank sheet deserves one
+honest sentence rather than eight complaints about the text it does not have.
+But faint is not the same as blank: a pale pencil page has almost no contrast
+and still carries rows of text, and telling its owner to skip it would lose
+the page. So low contrast alone never makes a page blank - it also has to have
+no rows of text in its projection profile.
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-from PIL import Image
 
-from . import _skew
-from ._images import PagePlanes
+from . import _images, _lighting, _skew
+from ._images import PagePlanes, percentile_sample
+from ._lighting import Border, PaperSurface
 from ._report import Issue, Measure
 from ._skew import LineGeometry
 from ._thresholds import Thresholds, bend
 
 logger = logging.getLogger(__name__)
 
-#: Tiles across and down the work plane used to find the local paper level.
-PAPER_TILES = 8
-#: Percentile within a tile taken as that tile's paper level.
-PAPER_PERCENTILE = 95.0
-#: Percentile of the whole work plane taken as the page's ink level. A page
-#: with as little as one line of text has more inked pixels than this.
-INK_PERCENTILE = 0.5
+#: Percentile of the flattened work plane taken as the page's ink level. A page
+#: with as little as one line of text has more inked pixels than this: one
+#: line across a letter page inks about 0.4% of it, so a higher percentile
+#: would read a sparse page's ink level off bare paper and call it blank.
+INK_PERCENTILE = 0.1
+#: Percentile taken as the page's paper level. Higher than the ink side's
+#: mirror image, so a blown highlight or a speck of glare cannot set it.
+PAPER_PERCENTILE = 99.5
+#: Ink-to-paper separation below which there is nothing to normalise at all:
+#: a sheet this flat is settled as blank without building any mask.
+MIN_MEASURABLE_CONTRAST = 0.01
 #: Normalised level below which a pixel counts as ink rather than paper.
 INK_LEVEL = 0.5
 #: Normalised level above which a pixel counts as clean paper.
 PAPER_LEVEL = 0.85
 #: Normalised band in which show-through lives: darker than paper, far lighter
-#: than ink.
-SHOW_THROUGH_BAND = (0.25, 0.80)
-#: Gradient, in normalised units per pixel, below which a mark is soft enough
-#: to have come through the sheet rather than been printed on it.
+#: than ink. The top of the band is an eighth below paper, where print
+#: bleeding through the sheet is plainly visible to anyone holding it.
+SHOW_THROUGH_BAND = (0.25, 0.88)
+#: Long edge of the plane show-through is measured on. Twice the work plane,
+#: so a ghost stroke a few native pixels wide is still a stroke.
+SHOW_THROUGH_LONG_EDGE = 2048
+#: Gradient, in normalised units per *native* pixel, below which a mark is
+#: soft enough to have come through the sheet rather than been printed on it.
+#: It is measured on the work plane, where one pixel spans several native
+#: ones, so the limit is scaled up by that factor - capped at
+#: :data:`SHOW_THROUGH_MAX_STEP` so a printed edge can never pass for soft.
 SHOW_THROUGH_SMOOTHNESS = 0.10
+SHOW_THROUGH_MAX_STEP = 0.35
 #: How far from real ink a soft grey mark must sit to count as show-through,
-#: in work-plane pixels. Antialiasing around a stroke is not show-through.
+#: in pixels of the show-through plane. Antialiasing around a stroke is not
+#: show-through. The clearance grows with the measured edge width, so the
+#: grey halo around the strokes of an out-of-focus page is not counted as
+#: print from the back.
 SHOW_THROUGH_CLEARANCE = 2
+#: Most the clearance is allowed to grow to, in pixels of that plane.
+SHOW_THROUGH_MAX_CLEARANCE = 20
 #: Native-resolution tiles sampled for sharpness, and how big each one is.
 SHARPNESS_TILES = 24
 SHARPNESS_TILE_PX = 256
+#: A tile is sampled only when its inked share is at least this share of the
+#: most-inked tile's, and at least :data:`SHARPNESS_MIN_TILE_INK` outright.
+SHARPNESS_TILE_SHARE = 0.25
+SHARPNESS_MIN_TILE_INK = 0.002
 #: Percentile of the gradient within a tile taken as its strongest edge.
 EDGE_PERCENTILE = 99.5
 #: Text height, in pixels, that sharpness is normalised to. A page whose text
@@ -79,8 +107,14 @@ REFERENCE_TEXT_HEIGHT_PX = 26.0
 EDGE_SHARE = 0.5
 #: Floor under that share, so a page of pure noise cannot call itself text.
 EDGE_FLOOR = 0.10
-
-_BILINEAR = getattr(getattr(Image, "Resampling", Image), "BILINEAR")
+#: The ink-is-text-shaped document test fails when less than this share of the
+#: ink lies in thin, edge-bounded strokes. Type of any weight measures 0.8 and
+#: up, heavily blurred type about 0.35, word-shaped blocks 0.2; a solid black
+#: shape measures a few per cent.
+MIN_STROKE_SHARE = 0.12
+#: It also fails when more than this share of the page is inked at all: the
+#: densest page of type inks well under a third of the sheet.
+MAX_TEXT_INK_SHARE = 0.5
 
 
 # --------------------------------------------------------------------------
@@ -116,6 +150,31 @@ def dilate(mask: np.ndarray, rounds: int = 1) -> np.ndarray:
     return grown
 
 
+def dilate_square(mask: np.ndarray, radius: int) -> np.ndarray:
+    """Grow ``mask`` by a ``2 * radius + 1`` square, in time independent of it.
+
+    A running count along each axis says whether any set pixel lies within
+    the window, so a wide clearance costs the same as a narrow one.
+    """
+    radius = int(radius)
+    if radius <= 0 or not mask.any():
+        return mask.copy()
+    grown = mask
+    for axis in (0, 1):
+        length = grown.shape[axis]
+        counts = np.cumsum(grown, axis=axis, dtype=np.int32)
+        pad = [(0, 0), (0, 0)]
+        pad[axis] = (1, 0)
+        counts = np.pad(counts, pad)
+        upper = np.minimum(np.arange(length) + radius + 1, length)
+        lower = np.maximum(np.arange(length) - radius, 0)
+        if axis == 0:
+            grown = (counts[upper, :] - counts[lower, :]) > 0
+        else:
+            grown = (counts[:, upper] - counts[:, lower]) > 0
+    return grown
+
+
 def tile_spans(length: int, tile: int) -> List[Tuple[int, int]]:
     """Cover ``length`` with spans of ``tile``, the last one nudged to fit."""
     if length <= tile:
@@ -124,51 +183,6 @@ def tile_spans(length: int, tile: int) -> List[Tuple[int, int]]:
     if starts[-1] + tile < length:
         starts.append(length - tile)
     return [(start, start + tile) for start in starts]
-
-
-def paper_grid(plane: np.ndarray, tiles: int = PAPER_TILES) -> np.ndarray:
-    """The paper level in each tile of ``plane``, as a small 2-D array.
-
-    A high percentile within the tile, not its maximum, so one speck of glare
-    cannot set the level for its whole neighbourhood.
-    """
-    height, width = plane.shape
-    rows = int(min(tiles, max(1, height // 8)))
-    columns = int(min(tiles, max(1, width // 8)))
-    row_edges = np.linspace(0, height, rows + 1).astype(int)
-    column_edges = np.linspace(0, width, columns + 1).astype(int)
-    grid = np.empty((rows, columns), dtype=np.float64)
-    for r in range(rows):
-        for c in range(columns):
-            block = plane[row_edges[r]:row_edges[r + 1],
-                          column_edges[c]:column_edges[c + 1]]
-            grid[r, c] = (
-                float(np.percentile(block, PAPER_PERCENTILE)) if block.size else 0.0
-            )
-    return grid
-
-
-def stretch(grid: np.ndarray, shape: Tuple[int, int]) -> np.ndarray:
-    """Stretch a tile grid smoothly back over a plane of ``shape``."""
-    height, width = shape
-    if grid.shape == (1, 1):
-        return np.full(shape, float(grid[0, 0]), dtype=np.float32)
-    scaled = np.clip(grid * 255.0, 0.0, 255.0).astype(np.uint8)
-    image = Image.fromarray(scaled, mode="L").resize((width, height), _BILINEAR)
-    return np.asarray(image, dtype=np.float32) / np.float32(255.0)
-
-
-def zone_name(row: int, column: int, rows: int, columns: int) -> str:
-    """Name the ninth of the page a tile sits in, e.g. ``"top-left corner"``."""
-    down = ("top", "middle", "bottom")[min(2, row * 3 // max(rows, 1))]
-    across = ("left", "centre", "right")[min(2, column * 3 // max(columns, 1))]
-    if down == "middle" and across == "centre":
-        return "centre of the page"
-    if down == "middle":
-        return "{0} edge".format(across)
-    if across == "centre":
-        return "{0} edge".format(down)
-    return "{0}-{1} corner".format(down, across)
 
 
 # --------------------------------------------------------------------------
@@ -180,23 +194,24 @@ def zone_name(row: int, column: int, rows: int, columns: int) -> str:
 class PageStats:
     """Everything the measures share, computed once per page."""
 
-    #: Luminance of the darkest real ink on the page, 0 to 1.
+    #: Luminance of the darkest real ink on the page, 0 to 1, after the page
+    #: has been divided by its own paper surface.
     ink_level: float
-    #: Luminance of clean paper, 0 to 1, taken over the whole page.
+    #: Luminance of clean paper, 0 to 1, on the same flattened page.
     paper_level: float
     #: Ink-to-paper separation, 0 to 1.
     contrast: float
-    #: Paper level per tile, as a small grid.
-    grid: np.ndarray
+    #: The paper surface and what it says about the light.
+    light: PaperSurface
     #: The work plane mapped to 0 at ink and 1 at the local paper level.
     normalised: np.ndarray
     #: Share of the page that is ink.
     ink_share: float
-    #: Share of the page that is clean paper.
+    #: Share of the page, as scanned, that is near its brightest paper.
     paper_share: float
     #: Share of the page that is ink belonging to thin, edge-bounded strokes.
     text_share: float
-    #: Paper-level swing across the page, relative to the page's paper level.
+    #: Paper-level fall from brightest to darkest, relative to the brightest.
     lighting_swing: float
     #: Where the page is darkest, in words.
     dark_zone: str
@@ -208,8 +223,32 @@ class PageStats:
     white_clipping: float
     #: Strongest edge step found, in luminance per pixel.
     edge_step: Optional[float]
-    #: How much of the page is blank sheet rather than anything at all.
+    #: True when the sheet has too little contrast or too little ink to hold
+    #: anything. Provisional: :func:`classify` still asks whether the profile
+    #: shows rows of text, because a faint page is not a blank one.
     blank: bool = False
+    #: Genuinely black scanner border cropped off before measuring.
+    border: Border = field(default_factory=Border)
+
+
+def turn_stats(stats: PageStats, quarter_turns: int) -> PageStats:
+    """``stats`` for the same page turned ``quarter_turns`` x 90 degrees.
+
+    Every number here is blind to a quarter turn - contrast, ink, paper,
+    clipping, show-through, how steeply the light falls - except where the
+    dark side is, so the maps are turned and the dark side named again rather
+    than the whole page measured a second time.
+    """
+    k = int(quarter_turns) % 4
+    if k == 0:
+        return stats
+    light = stats.light.turned(k)
+    return dataclasses.replace(
+        stats,
+        light=light,
+        normalised=np.ascontiguousarray(np.rot90(stats.normalised, k)),
+        dark_zone=light.dark_zone,
+    )
 
 
 def _clipping(lum: np.ndarray) -> Tuple[float, float]:
@@ -221,13 +260,20 @@ def _clipping(lum: np.ndarray) -> Tuple[float, float]:
     )
 
 
-def _edge_step(planes: PagePlanes, normalised: np.ndarray) -> Optional[float]:
+def _edge_step(
+    planes: PagePlanes, normalised: np.ndarray, light: Optional[PaperSurface] = None
+) -> Optional[float]:
     """Strongest typical edge on the page, in luminance per pixel.
 
     Measured at native resolution, because resizing an image changes exactly
-    the thing this measures, and only on the tiles carrying the most ink, so
-    the number describes strokes rather than empty margins. The median across
-    tiles is taken so one speck of dust cannot stand in for the whole page.
+    the thing this measures, and only on tiles that actually carry ink, so the
+    number describes strokes rather than empty margins. A tile counts when its
+    inked share is at least :data:`SHARPNESS_TILE_SHARE` of the most-inked
+    tile's: a cover page with three lines of text has three or four such
+    tiles, not twenty-four, and taking the most-inked twenty-four regardless
+    would put the median on bare paper and call a crisp page soft. The median
+    across the tiles that qualify is taken so one speck of dust cannot stand
+    in for the whole page.
     """
     lum = planes.lum
     height, width = lum.shape
@@ -242,17 +288,29 @@ def _edge_step(planes: PagePlanes, normalised: np.ndarray) -> Optional[float]:
     scale = planes.work_scale
     plane_height, plane_width = normalised.shape
 
+    inked = normalised < INK_LEVEL
+    if light is not None and light.black.any():
+        # Light too deep for the surface to call paper leaves dim paper that
+        # reads as ink; a tile of it has no strokes, only a shadow.
+        inked &= ~(_lighting.resample(light.black.astype(np.float32), inked.shape) > 0.0)
+
     def ink_in(span: Tuple[int, int, int, int]) -> float:
         top, bottom, left, right = span
         y0 = min(plane_height - 1, int(top * scale))
         y1 = max(y0 + 1, min(plane_height, int(round(bottom * scale))))
         x0 = min(plane_width - 1, int(left * scale))
         x1 = max(x0 + 1, min(plane_width, int(round(right * scale))))
-        return 1.0 - float(normalised[y0:y1, x0:x1].mean())
+        return float(inked[y0:y1, x0:x1].mean())
 
-    spans.sort(key=ink_in, reverse=True)
+    shares = [ink_in(span) for span in spans]
+    order = sorted(range(len(spans)), key=lambda index: -shares[index])
+    most = shares[order[0]] if order else 0.0
+    if most <= 0.0:
+        return None
+    floor = max(SHARPNESS_MIN_TILE_INK, SHARPNESS_TILE_SHARE * most)
+    chosen = [spans[index] for index in order if shares[index] >= floor]
     steps = []
-    for top, bottom, left, right in spans[:SHARPNESS_TILES]:
+    for top, bottom, left, right in chosen[:SHARPNESS_TILES]:
         block = lum[top:bottom, left:right].astype(np.float32) / np.float32(255.0)
         if block.size < 16:             # pragma: no cover - guarded by tile size
             continue
@@ -262,65 +320,176 @@ def _edge_step(planes: PagePlanes, normalised: np.ndarray) -> Optional[float]:
     return float(np.median(steps))
 
 
-def analyse(planes: PagePlanes, thresholds: Thresholds) -> PageStats:
+def _paper_share(plane: np.ndarray) -> float:
+    """Share of ``plane`` within :data:`PAPER_LEVEL` of its own paper level."""
+    ink, paper = _levels(plane)
+    near = plane > np.float32(ink + PAPER_LEVEL * max(paper - ink, 1e-6))
+    return float(np.count_nonzero(near)) / float(max(plane.size, 1))
+
+
+def _show_through(
+    planes: PagePlanes,
+    light: PaperSurface,
+    ink_level: float,
+    contrast: float,
+    edge_step: Optional[float],
+    work_normalised: Optional[np.ndarray] = None,
+) -> float:
+    """Share of the page carrying soft, pale marks well away from real ink.
+
+    Measured on its own plane, :data:`SHOW_THROUGH_LONG_EDGE` pixels on the
+    long side, rather than the work plane. Print bleeding through from the
+    back of a letter page is a few pixels wide; the work plane averages it
+    with the paper around it until it is barely darker than paper, and a
+    plainly visible ghost of the reverse side measures as nothing. The plane
+    is flattened by the same paper surface and put on the same ink-to-paper
+    scale as the rest of the measures.
+    """
+    longest = max(planes.lum.shape)
+    finer = min(1.0, SHOW_THROUGH_LONG_EDGE / float(max(longest, 1)))
+    if work_normalised is not None and finer < 1.7 * planes.work_scale:
+        # A page small enough that the finer plane would add little over the
+        # work plane - under twice its resolution: measure on the work plane.
+        normalised, scale = work_normalised, planes.work_scale
+    else:
+        plane, scale = _images.downscale_plane(planes.lum, SHOW_THROUGH_LONG_EDGE)
+        if plane.size == 0:             # pragma: no cover - guarded by prepare
+            return 0.0
+        surface = light.surface_for(plane.shape)
+        flat = plane / np.maximum(surface, np.float32(1e-3))
+        flat = np.clip(flat * np.float32(light.paper_level), 0.0, 1.0)
+        normalised = np.clip(
+            (flat - np.float32(ink_level)) / np.float32(max(contrast, 1e-6)), 0.0, 1.0
+        )
+    clearance = SHOW_THROUGH_CLEARANCE
+    if edge_step is not None and edge_step > 0:
+        edge_px = contrast / edge_step * scale
+        clearance = int(np.clip(np.ceil(edge_px) + 1, SHOW_THROUGH_CLEARANCE,
+                                SHOW_THROUGH_MAX_CLEARANCE))
+    low, high = SHOW_THROUGH_BAND
+    soft_grey = (normalised > low) & (normalised < high)
+    smooth_limit = min(
+        SHOW_THROUGH_MAX_STEP, SHOW_THROUGH_SMOOTHNESS / max(scale, 1e-6)
+    )
+    soft_grey &= gradient(normalised) < np.float32(smooth_limit)
+    if soft_grey.any():
+        inked = normalised < low
+        if clearance <= 4:
+            soft_grey &= ~dilate(inked, clearance)
+        else:
+            # A wide clearance - a soft page - as a square of three quarters
+            # the radius, which keeps about the same area clear as the
+            # diamond it stands for at a cost that does not grow with it.
+            soft_grey &= ~dilate_square(inked, int(round(0.75 * clearance)))
+    if soft_grey.any() and light.black.any():
+        # Where the light is so deep that the surface gave up on it as paper,
+        # the page reads as flat mid-grey: dim paper, not print from the back.
+        black = _lighting.resample(
+            _lighting.max_filter(light.black.astype(np.float32), 1), normalised.shape
+        ) > 0.0
+        soft_grey &= ~black
+    return float(np.count_nonzero(soft_grey)) / float(normalised.size)
+
+
+def _levels(plane: np.ndarray) -> Tuple[float, float]:
+    """The ink and paper levels of ``plane``: its low and high percentiles.
+
+    Both come from one partition of the data rather than two, which on a
+    megapixel plane is most of what an extra percentile costs.
+    """
+    ink, paper = np.percentile(
+        percentile_sample(plane), [INK_PERCENTILE, PAPER_PERCENTILE]
+    )
+    return float(ink), float(paper)
+
+
+def analyse(
+    planes: PagePlanes,
+    thresholds: Thresholds,
+    border: Optional[Border] = None,
+) -> PageStats:
     """Measure everything the individual measures share, once.
 
-    A sheet with no ink-to-paper separation is settled here and returned with
-    ``blank`` set, because every mask below it would be a division by nothing.
+    ``planes`` should already be cropped to the inside of any scanner border;
+    ``border`` is carried through so the report can say what was cropped.
+
+    A sheet with no measurable ink-to-paper separation at all is settled here
+    and returned with ``blank`` set, because every mask below it would be a
+    division by nothing. A merely faint sheet is measured in full and flagged,
+    and :func:`classify` decides.
     """
     work = planes.work
-    ink_level = float(np.percentile(work, INK_PERCENTILE))
-    paper_level = float(np.percentile(work, 100.0 - INK_PERCENTILE))
+    light = _lighting.paper_surface(work)
+    # Flat-field: divide by the local paper level, then put the page back on
+    # the scale of its own paper. A shadowed corner comes out as bright as the
+    # rest, with its ink exactly as dark relative to it as it was.
+    flat = work / np.maximum(light.surface, np.float32(1e-3))
+    flat = np.clip(flat * np.float32(light.paper_level), 0.0, 1.0)
+
+    ink_level, paper_level = _levels(flat)
     contrast = max(0.0, paper_level - ink_level)
-
-    grid = paper_grid(work)
-    middle = float(np.median(grid))
-    swing = float(np.percentile(grid, 90.0) - np.percentile(grid, 10.0))
-    lighting = swing / max(middle, 1e-6)
-    darkest = int(np.argmin(grid))
-    dark_zone = zone_name(
-        darkest // grid.shape[1], darkest % grid.shape[1], *grid.shape
-    )
     black_clipping, white_clipping = _clipping(planes.lum)
+    border = border if border is not None else Border()
 
-    if contrast < thresholds.blank_contrast:
+    if contrast < MIN_MEASURABLE_CONTRAST:
         return PageStats(
             ink_level=ink_level, paper_level=paper_level, contrast=contrast,
-            grid=grid, normalised=np.ones_like(work), ink_share=0.0,
-            paper_share=1.0, text_share=0.0, lighting_swing=lighting,
-            dark_zone=dark_zone, show_through=0.0,
+            light=light, normalised=np.ones_like(work), ink_share=0.0,
+            paper_share=1.0, text_share=0.0, lighting_swing=light.swing,
+            dark_zone=light.dark_zone, show_through=0.0,
             black_clipping=black_clipping, white_clipping=white_clipping,
-            edge_step=None, blank=True,
+            edge_step=None, blank=True, border=border,
         )
 
-    local_paper = stretch(grid, work.shape)
-    span = np.maximum(local_paper - np.float32(ink_level), np.float32(contrast * 0.25))
-    normalised = np.clip((work - np.float32(ink_level)) / span, 0.0, 1.0)
+    normalised = np.clip(
+        (flat - np.float32(ink_level)) / np.float32(max(contrast, 1e-6)), 0.0, 1.0
+    )
 
     ink_mask = normalised < INK_LEVEL
-    paper_share = float(np.count_nonzero(normalised > PAPER_LEVEL)) / normalised.size
+    # Paper share is never read off the page divided by its full surface: that
+    # would rescue a shadowed page but also turn the smooth tones of a
+    # photograph into something that looks like evenly lit paper, and this is
+    # one of the numbers that tells the two apart. It is read off the page as
+    # scanned, and off the page divided by the light alone - a smooth,
+    # low-order fit through the paper surface - and the better of the two is
+    # kept. As scanned, a strong ramp of light across a page of text leaves
+    # only its bright side near paper white; the fit evens out the ramp and
+    # leaves a picture's tones where they were.
+    paper_share = _paper_share(work)
+    if light.model is not None:
+        sample = percentile_sample(work)
+        stride = max(1, work.shape[0] // max(sample.shape[0], 1))
+        rows = np.minimum(np.arange(sample.shape[0]) * stride // _lighting.BLOCK_PX,
+                          light.model.shape[0] - 1)
+        columns = np.minimum(np.arange(sample.shape[1]) * stride // _lighting.BLOCK_PX,
+                             light.model.shape[1] - 1)
+        lit = sample / light.model[rows][:, columns] * np.float32(light.paper_level)
+        paper_share = max(paper_share, _paper_share(lit))
     ink_share = float(np.count_nonzero(ink_mask)) / normalised.size
+    blank = (
+        contrast < thresholds.blank_contrast
+        or ink_share < thresholds.blank_ink_share
+    )
 
     step = gradient(normalised)
-    strongest = float(np.percentile(step, EDGE_PERCENTILE)) if step.size else 0.0
+    strongest = (
+        float(np.percentile(percentile_sample(step), EDGE_PERCENTILE)) if step.size else 0.0
+    )
     edge_mask = step > max(EDGE_FLOOR, EDGE_SHARE * strongest)
     text_mask = ink_mask & dilate(edge_mask, 1)
     text_share = float(np.count_nonzero(text_mask)) / normalised.size
 
-    low, high = SHOW_THROUGH_BAND
-    soft_grey = (normalised > low) & (normalised < high)
-    soft_grey &= step < SHOW_THROUGH_SMOOTHNESS
-    soft_grey &= ~dilate(normalised < low, SHOW_THROUGH_CLEARANCE)
-    show_through = float(np.count_nonzero(soft_grey)) / normalised.size
+    edge_step = _edge_step(planes, normalised, light) if ink_share > 0.0 else None
+    show_through = _show_through(planes, light, ink_level, contrast, edge_step, normalised)
 
-    blank = ink_share < thresholds.blank_ink_share
     return PageStats(
         ink_level=ink_level, paper_level=paper_level, contrast=contrast,
-        grid=grid, normalised=normalised, ink_share=ink_share,
-        paper_share=paper_share, text_share=text_share, lighting_swing=lighting,
-        dark_zone=dark_zone, show_through=show_through,
-        black_clipping=black_clipping, white_clipping=white_clipping,
-        edge_step=None if blank else _edge_step(planes, normalised), blank=blank,
+        light=light, normalised=normalised, ink_share=ink_share,
+        paper_share=paper_share, text_share=text_share,
+        lighting_swing=light.swing, dark_zone=light.dark_zone,
+        show_through=show_through, black_clipping=black_clipping,
+        white_clipping=white_clipping, edge_step=edge_step, blank=blank,
+        border=border,
     )
 
 
@@ -337,13 +506,47 @@ def _holds_lines(
     Swing alone is not enough. A photograph of sky over land swings hard across
     three broad bands and would pass a contrast test on its own, so the bands
     also have to be fine enough to repeat down the page the way lines of text
-    do. Both tests are applied here so the verdict can name whichever failed.
+    do. And twenty specks of dust down a blank sheet make a spiky, repeating
+    profile too, so each band also has to carry ink across the page the way a
+    line of words does. All three tests are applied here so the verdict can
+    name whichever failed.
     """
     if geometry.line_contrast < thresholds.document_line_contrast:
         return False
     if not geometry.pitch or geometry.pitch <= 0:
         return False
+    if geometry.band_coverage < _skew.MIN_BAND_COVERAGE:
+        return False
     return geometry.pitch * _skew.MIN_LINE_REPEATS <= rows
+
+
+def settled_without_lines(
+    planes: PagePlanes, stats: PageStats, thresholds: Thresholds
+) -> bool:
+    """True when the tone tests alone already make this a photograph.
+
+    Three of :func:`classify`'s four document tests need no projection
+    profile: how much of the page is near paper white, how colourful it is,
+    and whether its ink is text-shaped. When enough of those already fail,
+    the line test cannot rescue the page, so the caller can skip the
+    orientation search that would feed it - which is the most expensive thing
+    done to a photograph.
+    """
+    if stats.blank:
+        return False
+    failed = int(stats.paper_share < thresholds.document_paper_share)
+    failed += int(planes.colour > thresholds.document_colour_spread)
+    failed += int(not _ink_is_text_shaped(stats))
+    return failed >= thresholds.document_failed_tests
+
+
+def _ink_is_text_shaped(stats: PageStats) -> bool:
+    """Thin strokes covering well under half the page, as type does."""
+    if stats.ink_share > MAX_TEXT_INK_SHARE:
+        return False
+    if stats.ink_share <= 0.0:
+        return True
+    return stats.text_share / stats.ink_share >= MIN_STROKE_SHARE
 
 
 def classify(
@@ -354,23 +557,28 @@ def classify(
 ) -> Tuple[str, Dict[str, float], List[str]]:
     """Decide whether this is a document, a blank sheet or a photograph.
 
-    Blank comes first and is decided on its own: either the sheet has no
-    ink-to-paper separation at all, or it has separation but almost nothing
-    inked. Either way there is nothing to read.
+    Blank comes first: either the sheet has almost no ink-to-paper separation,
+    or it has separation but almost nothing inked, and in both cases the
+    projection profile shows no rows of text. The last condition is what keeps
+    a faint pencil page from being skipped as empty; it is reported as a
+    document with a contrast problem instead.
 
-    A document is then recognised by three tests, and a page is called a
+    A document is then recognised by four tests, and a page is called a
     photograph when it fails :attr:`Thresholds.document_failed_tests` of them:
 
     1. most of the page is somewhere near paper white,
     2. the projection profile swings the way rows of text make it swing,
-    3. the page is close enough to neutral to be ink on paper.
+    3. the page is close enough to neutral to be ink on paper,
+    4. the ink is text-shaped: thin strokes, covering well under half the
+       page, rather than solid shapes or broad bands of tone.
 
     Any one test can be wrong on its own - a full-page table is dark, a title
-    page has few rows, a letterhead is coloured - which is why no single one
-    decides. Returns the kind, the numbers behind it, and the tests that
+    page has few rows, a letterhead is coloured, a heading in heavy type is
+    mostly solid ink - which is why no single one decides. Returns the kind, the numbers behind it, and the tests that
     failed, all of which go into the report so the verdict can be argued with.
     """
     evidence = {
+        "stroke_share": stats.text_share / max(stats.ink_share, 1e-9),
         "contrast": stats.contrast,
         "line_pitch": float(geometry.pitch or 0.0),
         "ink_share": stats.ink_share,
@@ -380,7 +588,8 @@ def classify(
         "line_contrast": geometry.line_contrast,
         "line_count": float(geometry.line_count),
     }
-    if stats.blank:
+    lines = _holds_lines(geometry, planes.work.shape[0], thresholds)
+    if stats.blank and not lines:
         why = (
             "ink-to-paper contrast {0:.3f} is under {1:.2f}".format(
                 stats.contrast, thresholds.blank_contrast
@@ -397,7 +606,7 @@ def classify(
                 stats.paper_share, thresholds.document_paper_share
             )
         )
-    if not _holds_lines(geometry, planes.work.shape[0], thresholds):
+    if not lines:
         failed.append(
             "the profile swings {0:.2f} times its mean across bands {1} rows "
             "apart, which is not how rows of text repeat".format(
@@ -409,6 +618,17 @@ def classify(
         failed.append(
             "colour spread {0:.2f} is over {1:.2f}, too colourful for ink on "
             "paper".format(planes.colour, thresholds.document_colour_spread)
+        )
+    stroked = stats.text_share / max(stats.ink_share, 1e-9)
+    if stats.ink_share > MAX_TEXT_INK_SHARE:
+        failed.append(
+            "{0:.0%} of the page is inked, and text never covers more than "
+            "{1:.0%}".format(stats.ink_share, MAX_TEXT_INK_SHARE)
+        )
+    elif stats.ink_share > 0.0 and stroked < MIN_STROKE_SHARE:
+        failed.append(
+            "only {0:.0%} of the ink is in thin strokes, so it is solid shapes "
+            "rather than letters".format(stroked)
         )
     if len(failed) >= thresholds.document_failed_tests:
         return "photograph", evidence, failed
@@ -498,6 +718,7 @@ def text_size(
     geometry: LineGeometry,
     scale: float,
     thresholds: Thresholds,
+    document: bool = False,
 ) -> Tuple[Measure, Optional[Issue], Optional[float]]:
     """How tall a line of text stands, in pixels.
 
@@ -511,8 +732,26 @@ def text_size(
 
     Returns the measure, any issue, and the height in native pixels so the
     report and the sharpness measure can both use it.
+
+    ``document`` says the page has been judged a document page. A document
+    page with no rows of text on it at all - a thumbnail, a sliver, a single
+    black shape - has nothing an OCR engine could read, and must not pass as
+    ready with a perfect score just because every other measure had nothing
+    to complain about. It scores 0 here and fails.
     """
     if geometry.text_height is None or scale <= 0:
+        if document:
+            return _measure(
+                "text_size", None, "px", 0.0, False,
+                "No rows of text were found on this page, so there is nothing "
+                "an OCR engine could read.",
+            ), Issue(
+                "text_size", "failure",
+                "No rows of text were found on this page, so there is nothing "
+                "here an OCR engine could read.",
+                "check that this is the printed side of a page of text, and that "
+                "the scan shows the whole page rather than a corner of it",
+            ), None
         return _measure(
             "text_size", None, "px", None, True,
             "No rows of text were found, so there is no text height to report.",
@@ -553,8 +792,18 @@ def text_size(
     ), height
 
 
-def skew(degrees: float, thresholds: Thresholds) -> Built:
-    """How far the text runs off horizontal, in degrees."""
+def skew(degrees: float, thresholds: Thresholds, applies: bool = True) -> Built:
+    """How far the text runs off horizontal, in degrees.
+
+    ``applies`` is ``False`` when no rows of text were found, in which case
+    there is no angle to report and nothing is scored.
+    """
+    if not applies:
+        return _measure(
+            "skew", None, "degrees", None, True,
+            "No rows of text were found, so there is no skew to measure.",
+            applies=False,
+        ), None
     amount = abs(degrees)
     score = bend(amount, thresholds.target_skew_degrees,
                  thresholds.limit_skew_degrees, thresholds.hopeless_skew_degrees)
@@ -577,9 +826,11 @@ def skew(degrees: float, thresholds: Thresholds) -> Built:
         "skew", "warning" if amount < 2.0 * thresholds.limit_skew_degrees
         else "failure",
         "The page is turned {0:.2f} degrees {1} of horizontal.".format(
-            amount, direction
+            amount, "counter-clockwise" if degrees > 0 else "clockwise"
         ),
-        "deskew by {0:.1f} degrees".format(abs(degrees)),
+        "deskew by {0:.1f} degrees {1}".format(
+            amount, "clockwise" if degrees > 0 else "counter-clockwise"
+        ),
     )
 
 
@@ -659,27 +910,75 @@ def sharpness(
 
 
 def lighting(stats: PageStats, thresholds: Thresholds) -> Built:
-    """How much the paper level swings across the page."""
+    """How far the paper level falls across the page, and towards which side.
+
+    This is a gradient, not a darkness test: the paper surface is estimated
+    everywhere and the measure is how far it falls from its brightest part to
+    its darkest, as a share of the brightest. Genuinely black regions are not
+    paper and are left out, so a scanner border cannot pose as a shadow here
+    any more than a shadow can pose as a border there.
+    """
+    light = stats.light
     value = stats.lighting_swing
     score = bend(value, thresholds.target_lighting, thresholds.limit_lighting,
                  thresholds.hopeless_lighting)
     ok = value <= thresholds.limit_lighting
     measure = _measure(
         "lighting", value, "0-1", score, ok,
-        "The paper level swings {0:.0%} across the page, darkest at the {1}; "
-        "{2:.0%} is as uneven as OCR tolerates.".format(
-            value, stats.dark_zone, thresholds.limit_lighting
+        "The paper level falls {0:.0%} from the brightest part of the page to "
+        "the darkest{1}; {2:.0%} is as uneven as OCR tolerates.".format(
+            value,
+            "" if value < thresholds.target_lighting
+            else ", which is towards the {0}".format(stats.dark_zone),
+            thresholds.limit_lighting,
         ),
-        dark_zone=stats.dark_zone,
+        dark_zone=stats.dark_zone, brightest=light.brightest,
+        darkest=light.darkest, slope_across=light.slope_across,
+        slope_down=light.slope_down,
     )
     if ok:
         return measure, None
     return measure, Issue(
         "lighting", "warning" if value < 2.0 * thresholds.limit_lighting else "failure",
-        "The page is lit unevenly: the paper level swings {0:.0%} between its "
-        "brightest and darkest parts.".format(value),
+        "The page is lit unevenly: the paper level falls {0:.0%} towards the {1}."
+        .format(value, stats.dark_zone),
         "increase lighting on the {0}, or lay the page flat so it does not "
         "curl away from the light".format(stats.dark_zone),
+    )
+
+
+def border(stats: PageStats) -> Built:
+    """Whether a genuinely black scanner border runs in from the image edges.
+
+    Reported rather than scored: the border has already been cropped off
+    before anything else was measured, so it costs nothing here, but an OCR
+    engine handed the uncropped image will read it as a column of junk.
+    """
+    found = stats.border
+    if not found.found:
+        return _measure(
+            "border", 0.0, "share", None, True,
+            "No black scanner border runs in from the edges of the image.",
+        ), None
+    where = found.describe()
+    measure = _measure(
+        "border", found.area_share, "share", None, False,
+        "A black scanner border covers {0:.1%} of the image along the {1} "
+        "side(s); it was cropped off before measuring the page.".format(
+            found.area_share, where
+        ),
+        top=found.top, bottom=found.bottom, left=found.left, right=found.right,
+        sides=list(found.sides),
+    )
+    edges = ", ".join(
+        "{0} px off the {1} edge".format(getattr(found, side), side)
+        for side in found.sides
+    )
+    return measure, Issue(
+        "border", "warning",
+        "A black scanner border runs along the {0} side(s) of the image, and "
+        "OCR engines read black bands as junk characters.".format(where),
+        "crop the black border before OCR: {0}".format(edges),
     )
 
 

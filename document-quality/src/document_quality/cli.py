@@ -22,7 +22,7 @@ from . import __version__
 from ._assess import assess_batch
 from ._images import IMAGE_SUFFIXES
 from ._report import BatchReport
-from ._thresholds import describe_thresholds
+from ._thresholds import describe_thresholds, resolve_thresholds
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +72,21 @@ def collect_paths(given: Sequence[str]) -> List[str]:
     return found
 
 
+def positive_dpi(text: str) -> float:
+    """``--dpi`` must be a positive, finite number; argparse reports otherwise."""
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            "must be a number of dots per inch, got {0!r}".format(text)
+        ) from None
+    if not (value > 0.0 and value != float("inf")):
+        raise argparse.ArgumentTypeError(
+            "must be a positive number of dots per inch, got {0!r}".format(text)
+        )
+    return value
+
+
 def build_parser() -> argparse.ArgumentParser:
     """The argument parser, also used to render ``--help``."""
     parser = argparse.ArgumentParser(
@@ -90,7 +105,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="image files, or folders of them",
     )
     parser.add_argument(
-        "--dpi", type=float, default=None,
+        "--dpi", type=positive_dpi, default=None,
         help="scan resolution, for files that do not carry their own",
     )
     parser.add_argument(
@@ -179,6 +194,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     try:
         overrides = parse_overrides(options.threshold)
+        # Checked here, before any page is read, so an unknown name is a usage
+        # error (exit 2) rather than a traceback that exits 1 - which is the
+        # code for "a page is not ready".
+        resolve_thresholds(overrides or None)
     except ValueError as error:
         parser.error(str(error))
         return EXIT_UNREADABLE          # pragma: no cover - parser.error exits
@@ -221,7 +240,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         with open(options.output, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2, ensure_ascii=False)
         if not options.quiet:
-            print("Wrote {0}".format(options.output))
+            # A status line, so it goes to stderr: with --json, stdout has to
+            # stay one JSON document that a pipe can parse.
+            print("Wrote {0}".format(options.output), file=sys.stderr)
 
     if not batch.reports:
         return EXIT_UNREADABLE

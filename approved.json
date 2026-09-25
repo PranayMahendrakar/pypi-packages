@@ -21,5 +21,16 @@
   "voice-activity-ai",
   "speech-quality",
   "ocr-cleaner",
-  "vision-anomaly"
+  "vision-anomaly",
+  "document-quality",
+  "audio-anomaly",
+  "production-anomaly",
+  "image-dedup-ai",
+  "object-counter-ai",
+  "video-event-detector",
+  "audio-clean-ai",
+  "speaker-diarize-lite",
+  "voice-commands-ai",
+  "call-ai-metrics",
+  "offline-stt-router"
 ]

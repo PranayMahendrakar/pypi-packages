@@ -8,7 +8,8 @@ worth doing something about, a :class:`PageReport` for one page and a
 Two rules run through all of it. Every verdict carries the number it was made
 from and the boundary it was compared against, so nothing has to be taken on
 trust. And every problem carries a ``fix``: not "contrast is low" but "rescan
-with the lid closed", not "the page is crooked" but "deskew by 2.30 degrees".
+with the lid closed", not "the page is crooked" but "deskew by 2.3 degrees
+clockwise".
 A report that only names problems leaves the work undone.
 
 All text is plain ASCII, and JSON is written with ``ensure_ascii=False``, so a
@@ -40,6 +41,28 @@ def _round(value: Optional[float], places: int = 4) -> Optional[float]:
     return None if value is None else round(float(value), places)
 
 
+#: The passing mark a measure's score is compared with; see
+#: :data:`document_quality._thresholds.PASS_SCORE`. Repeated here so this
+#: module stays free of imports from the measuring side.
+_PASS_MARK = 60.0
+
+
+def _shown_score(score: Optional[float], ok: bool, places: int) -> Optional[float]:
+    """A measure's score rounded for display without crossing the passing mark.
+
+    A dpi of 199.9996 scores 59.9998 and fails; rounded plainly it would show
+    as 60, the passing mark, beside ``ok: false``. A failing score is rounded
+    down instead, so what is shown always agrees with the verdict.
+    """
+    if score is None:
+        return None
+    shown = round(float(score), places)
+    if not ok and shown >= _PASS_MARK:
+        step = 10.0 ** (-places)
+        shown = round(_PASS_MARK - step, places)
+    return shown
+
+
 @dataclass(frozen=True)
 class Issue:
     """One thing wrong with a page, and what to do about it.
@@ -51,8 +74,8 @@ class Issue:
             knowing) or ``"info"`` (a fact, not a fault).
         message: what was measured, in one sentence, naming the number and the
             boundary it missed.
-        fix: the concrete remedy, e.g. ``"deskew by 2.30 degrees"`` or
-            ``"rescan at 300 dpi"``. Never empty.
+        fix: the concrete remedy, e.g. ``"deskew by 2.3 degrees clockwise"``
+            or ``"rescan at 300 dpi"``. Never empty.
     """
 
     kind: str
@@ -115,7 +138,7 @@ class Measure:
             "name": self.name,
             "value": _round(self.value),
             "unit": self.unit,
-            "score": _round(self.score, 1),
+            "score": _shown_score(self.score, self.ok, 1),
             "ok": bool(self.ok),
             "applies": bool(self.applies),
             "message": self.message,
@@ -249,9 +272,17 @@ class PageReport:
             verdict = "ready to OCR"
         else:
             verdict = "not ready to OCR"
-        return "{0}: {1} - score {2:.0f} of 100".format(
+        line = "{0}: {1} - score {2:.0f} of 100".format(
             self.source, verdict, self.score
         )
+        if self.kind == "document" and not self.ocr_ready:
+            held = []
+            for item in self.failures:
+                if item.kind not in held:
+                    held.append(item.kind)
+            if held:
+                line += ", held back by {0}".format(", ".join(held))
+        return line
 
     def _description(self) -> str:
         """The second line: what this page physically is."""
@@ -294,7 +325,9 @@ class PageReport:
             width = max(len(item.name) for item in scored)
             for item in scored:
                 value = "  n/a" if item.value is None else "{0:7.3f}".format(item.value)
-                score = "   -" if item.score is None else "{0:4.0f}".format(item.score)
+                score = "   -" if item.score is None else "{0:4.0f}".format(
+                    _shown_score(item.score, item.ok, 0)
+                )
                 lines.append(
                     "  {0:<{1}} {2} {3}  {4}".format(
                         item.name, width, value, score, item.message

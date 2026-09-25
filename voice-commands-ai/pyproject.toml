@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "voice-commands-ai"
+version = "0.1.0"
+description = "Turn spoken or transcribed commands into structured Python actions"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Pranay Mahendrakar" }]
+keywords = [
+  "voice-commands",
+  "voice-assistant",
+  "intent-matching",
+  "slot-filling",
+  "speech-to-text",
+  "transcription",
+  "fuzzy-matching",
+  "spoken-numbers",
+  "natural-language",
+  "command-parser",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+  "Topic :: Text Processing :: Linguistic",
+  "Topic :: Home Automation",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+voice-commands-ai = "voice_commands_ai.cli:main"
+
+[project.urls]
+Homepage = "https://pypi.org/project/voice-commands-ai/"
+Author = "https://pypi.org/user/pranaymahendrakar/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/voice_commands_ai"]

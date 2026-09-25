@@ -15,13 +15,16 @@ in one line::
 
 Every verdict carries the number behind it and the boundary it was compared
 against, and every problem carries the concrete remedy: "rescan at 300 dpi",
-"deskew by 2.30 degrees", "increase lighting on the left edge". Nothing here
+"deskew by 2.3 degrees clockwise", "increase lighting on the left edge",
+"crop the black border before OCR". Nothing here
 downloads a model, calls out to a network, or needs OpenCV - it is numpy and
 Pillow measuring a page.
 
 What gets measured: effective resolution, skew angle, ink-to-paper contrast,
-sharpness, uneven lighting, show-through from the reverse side, black and white
-clipping, text line height in pixels, and how much of the page looks like text.
+sharpness, uneven lighting (as a gradient of the paper level, so a shadow is
+never mistaken for a scanner border), show-through from the reverse side, black
+and white clipping, genuinely black scanner borders, text line height in
+pixels, and how much of the page looks like text.
 A blank sheet is reported as blank rather than as eight failures, and a
 photograph is reported as not a document page rather than as a bad one.
 """

@@ -22,6 +22,7 @@ allocated, and nothing in this package writes through a view of it.
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
 from dataclasses import dataclass
@@ -48,12 +49,33 @@ COLOUR_LONG_EDGE = 192
 MIN_CREDIBLE_DPI = 24.0
 #: Anything claiming more than this is metadata noise too.
 MAX_CREDIBLE_DPI = 4800.0
+#: A dpi read from a file within this of a whole number is taken as that
+#: number: PNG's pixels-per-metre field cannot store 300 dpi exactly.
+DPI_SNAP = 0.05
 
 _EXIF_ORIENTATION_TAG = 0x0112
 _WIDE_MODES = ("I", "I;16", "I;16B", "I;16L", "I;16N", "F")
 
 # Pillow moved the resampling filters in 9.1; both spellings are supported.
 _BOX = getattr(getattr(Image, "Resampling", Image), "BOX")
+
+
+#: About how many pixels a page-wide percentile is taken over. A level such as
+#: "the 99.5th percentile of the page" is a statistic of the whole sheet, and
+#: an evenly strided sample of this size gives it to well under a grey level
+#: while costing a fraction of a full partition of a megapixel plane.
+PERCENTILE_SAMPLE = 200_000
+
+
+def percentile_sample(plane: np.ndarray, target: int = PERCENTILE_SAMPLE) -> np.ndarray:
+    """An evenly strided view of ``plane`` with about ``target`` pixels.
+
+    Only ever read from; a plane already that small comes back as it is.
+    """
+    stride = int(round(np.sqrt(plane.size / float(max(1, target)))))
+    if stride <= 1:
+        return plane
+    return plane[::stride, ::stride]
 
 
 def looks_like_image_path(path: Any) -> bool:
@@ -81,8 +103,19 @@ def open_image(source: Any) -> Image.Image:
         path = os.fspath(source)
         if not os.path.exists(path):
             raise FileNotFoundError("{0!r} does not exist".format(path))
+        if os.path.isdir(path):
+            raise IsADirectoryError(
+                "{0!r} is a folder, not an image file; pass the files in it, or "
+                "use assess_batch".format(path)
+            )
         image = Image.open(path)
-        image.load()
+        try:
+            image.load()
+        except BaseException:
+            # A truncated or corrupt file must not stay open - on Windows an
+            # open handle keeps the file locked until garbage collection.
+            image.close()
+            raise
         return image
     raise TypeError(
         "image must be a PIL.Image, a file path or a numpy array, not {0}".format(
@@ -111,19 +144,64 @@ def image_from_array(array: np.ndarray) -> Image.Image:
     if data.ndim == 3 and data.shape[2] == 1:
         data = data[:, :, 0]
     if data.dtype != np.uint8:
-        floats = np.asarray(data, dtype=np.float64)
-        finite = floats[np.isfinite(floats)]
-        low = float(finite.min()) if finite.size else 0.0
-        high = float(finite.max()) if finite.size else 0.0
-        if low >= 0.0 and high <= 1.0:
-            floats = floats * 255.0
-        data = np.clip(np.nan_to_num(floats), 0.0, 255.0).astype(np.uint8)
+        data = to_8bit(data)
     else:
         data = data.copy()
-    channels = 1 if data.ndim == 2 else data.shape[2]
-    return Image.fromarray(
-        np.ascontiguousarray(data), mode={1: "L", 3: "RGB", 4: "RGBA"}[channels]
-    )
+    # uint8 (h, w), (h, w, 3) and (h, w, 4) arrays open as L, RGB and RGBA.
+    return Image.fromarray(np.ascontiguousarray(data))
+
+
+def to_8bit(data: np.ndarray, sixteen_bit: bool = False) -> np.ndarray:
+    """Bring a numeric array onto the 0-255 scale without changing its contrast.
+
+    Four conventions meet here, and each is mapped by its own fixed scale, so
+    a faded page stays faded however it arrives: floats in 0-1 are multiplied
+    by 255, anything already in 0-255 is kept, and 16-bit data - a ``uint16``
+    array, a 16-bit Pillow mode, or any values in 0-65535 - is divided by 257,
+    which takes 65535 to exactly 255. Stretching the range actually used onto
+    0-255 instead would turn ink at 200 on paper at 245 into black on white,
+    and pass a page OCR will struggle with. Only data on no recognisable scale
+    at all - negative values, or beyond 16 bits - has its used range
+    stretched, because there is no other scale to read it on.
+
+    ``sixteen_bit`` says the data is 16-bit whatever values it holds.
+
+    Raises:
+        TypeError: if the data is complex or not numeric at all.
+    """
+    kind = data.dtype.kind
+    if kind == "c":
+        raise TypeError("complex arrays are not images; pass the magnitude or real part")
+    if kind == "b":
+        return data.astype(np.uint8) * np.uint8(255)
+    if kind not in "uif":
+        raise TypeError(
+            "array images must hold numbers, not {0}".format(data.dtype)
+        )
+    if kind == "u" and data.dtype.itemsize == 2:
+        sixteen_bit = True
+    floats = np.asarray(data, dtype=np.float64)
+    finite = np.isfinite(floats)
+    values = floats[finite]
+    low = float(values.min()) if values.size else 0.0
+    high = float(values.max()) if values.size else 0.0
+    floats = np.where(finite, floats, low)
+    if sixteen_bit and low >= 0.0 and high <= 65535.0:
+        floats = floats / 257.0
+    elif low >= 0.0 and high <= 1.0:
+        floats = floats * 255.0
+    elif low >= 0.0 and high <= 255.0:
+        pass
+    elif low >= 0.0 and high <= 65535.0:
+        floats = floats / 257.0
+    else:
+        span = high - low
+        logger.warning(
+            "image values run from %g to %g, which is no standard scale; "
+            "stretching them onto 0-255", low, high,
+        )
+        floats = (floats - low) * (255.0 / span) if span > 1e-12 else floats * 0.0
+    return np.clip(np.rint(floats), 0.0, 255.0).astype(np.uint8)
 
 
 def apply_exif_orientation(image: Image.Image) -> Tuple[Image.Image, bool]:
@@ -157,14 +235,13 @@ def _flatten_alpha(image: Image.Image) -> Image.Image:
 
 
 def _stretch_wide_mode(image: Image.Image) -> Image.Image:
-    """16-bit and float scans: stretch the used range into 8 bits, no clipping."""
-    data = np.asarray(image).astype(np.float64)
-    low, high = float(np.nanmin(data)), float(np.nanmax(data))
-    if not np.isfinite(low) or not np.isfinite(high) or high - low < 1e-12:
-        data = np.zeros_like(data)
-    else:
-        data = (data - low) * (255.0 / (high - low))
-    return Image.fromarray(np.clip(data, 0.0, 255.0).astype(np.uint8), mode="L")
+    """16-bit, 32-bit and float scans as 8-bit, each on its own fixed scale.
+
+    See :func:`to_8bit`: a 16-bit mode is divided by 257, a float mode is read
+    as 0-1 or 0-255, and nothing is stretched unless it sits on no known scale.
+    """
+    data = np.asarray(image)
+    return Image.fromarray(to_8bit(data, sixteen_bit=image.mode.startswith("I;16")))
 
 
 def _has_alpha(image: Image.Image) -> bool:
@@ -211,7 +288,7 @@ def downscale_plane(lum: np.ndarray, long_edge: int) -> Tuple[np.ndarray, float]
         return lum.astype(np.float32) / np.float32(255.0), 1.0
     ratio = long_edge / float(longest)
     target = (max(1, int(round(width * ratio))), max(1, int(round(height * ratio))))
-    small = Image.fromarray(lum, mode="L").resize(target, _BOX)
+    small = Image.fromarray(np.ascontiguousarray(lum, dtype=np.uint8)).resize(target, _BOX)
     plane = np.asarray(small, dtype=np.float32) / np.float32(255.0)
     return plane, small.size[0] / float(width)
 
@@ -262,7 +339,14 @@ def dpi_from_image(image: Image.Image) -> Optional[float]:
             values.append(value)
     if not values:
         return None
-    return float(sum(values) / len(values))
+    found = float(sum(values) / len(values))
+    # PNG stores whole pixels per metre, so 300 dpi comes back as 299.9994 and
+    # 200 dpi as 199.9996 - just under the floor it was saved at. Anything
+    # within a twentieth of a dot of a whole number is that whole number.
+    nearest = float(round(found))
+    if abs(found - nearest) <= DPI_SNAP:
+        found = nearest
+    return found
 
 
 def coerce_dpi(dpi: Any) -> Optional[float]:
@@ -300,10 +384,69 @@ class PagePlanes:
     dpi_source: Optional[str]
     exif_applied: bool
 
+    #: ``(left, top, right, bottom)`` in native pixels when the planes have been
+    #: cropped to the inside of a scanner border, else ``None``.
+    interior: Optional[Tuple[int, int, int, int]] = None
+    #: Share of the image that was black lid outside a crooked sheet, painted
+    #: over with paper before measuring. 0 when there was none.
+    outside_share: float = 0.0
+
     @property
     def megapixels(self) -> float:
         """Page area in megapixels."""
         return (self.width * self.height) / 1e6
+
+    def turned(self, quarter_turns: int) -> "PagePlanes":
+        """These planes turned ``quarter_turns`` x 90 degrees counter-clockwise.
+
+        Used to measure a page lying on its side as the upright page it will
+        be once rotated. Width, height and dpi describe the file and are kept.
+        """
+        k = int(quarter_turns) % 4
+        if k == 0:
+            return self
+        return dataclasses.replace(
+            self,
+            lum=np.ascontiguousarray(np.rot90(self.lum, k)),
+            work=np.ascontiguousarray(np.rot90(self.work, k)),
+            fine=np.ascontiguousarray(np.rot90(self.fine, k)),
+        )
+
+    def cropped(self, box: Tuple[int, int, int, int]) -> "PagePlanes":
+        """These planes cut down to ``box`` (native ``left, top, right, bottom``).
+
+        Width, height and dpi stay those of the whole image, because they are
+        facts about the scan; only the pixels measured change. Every array is a
+        fresh copy, never a view.
+        """
+        left, top, right, bottom = (int(value) for value in box)
+        left, top = max(0, left), max(0, top)
+        right, bottom = min(self.lum.shape[1], right), min(self.lum.shape[0], bottom)
+        if right - left < 2 or bottom - top < 2:
+            return self
+
+        def cut(plane: np.ndarray, scale: float) -> np.ndarray:
+            rows, columns = plane.shape
+            y0 = min(rows - 1, int(np.floor(top * scale)))
+            x0 = min(columns - 1, int(np.floor(left * scale)))
+            y1 = max(y0 + 1, min(rows, int(np.ceil(bottom * scale))))
+            x1 = max(x0 + 1, min(columns, int(np.ceil(right * scale))))
+            return plane[y0:y1, x0:x1].copy()
+
+        return PagePlanes(
+            width=self.width,
+            height=self.height,
+            lum=self.lum[top:bottom, left:right].copy(),
+            work=cut(self.work, self.work_scale),
+            work_scale=self.work_scale,
+            fine=cut(self.fine, self.fine_scale),
+            fine_scale=self.fine_scale,
+            colour=self.colour,
+            dpi=self.dpi,
+            dpi_source=self.dpi_source,
+            exif_applied=self.exif_applied,
+            interior=(left, top, right, bottom),
+        )
 
 
 def prepare(source: Any, dpi: Any = None) -> PagePlanes:
