@@ -1,6 +1,4 @@
 [
-  "sensor-anomaly",
-  "model-benchmark",
   "offline-ml",
   "model-watchdog",
   "ml-inference-profiler",

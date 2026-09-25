@@ -1,0 +1,18 @@
+[
+  "dataset-health",
+  "near-dupes",
+  "synthetic-tabular",
+  "data-drift-lite",
+  "ml-feature-check",
+  "smartclean-df",
+  "dataset-splitter",
+  "privacy-scan-ml",
+  "dataframe-schema-guard",
+  "machine-health",
+  "rule-auto-label",
+  "timeseries-anomaly",
+  "quality-predictor",
+  "energy-analyzer-ai",
+  "sensor-anomaly",
+  "model-benchmark"
+]

@@ -33,12 +33,24 @@ on:
         required: false
         default: false
         type: boolean
+      force:
+        description: "Ignore the minimum gap since the last publish"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
 
 env:
   MAX_PER_RUN: ${{ inputs.max_packages || '4' }}
+  # Hours to leave between publishing runs. PyPI answers "429 Too many new projects
+  # created" and never says for how long, but the pattern is consistent: about four
+  # projects go through, then everything is refused for the best part of a day.
+  # Hammering it every four hours through a closed window achieves nothing and is
+  # exactly the behaviour an abuse limiter is watching for, so the run now checks how
+  # long it has been since anything actually landed and stands down if it is too soon.
+  MIN_GAP_HOURS: "26"
 
 jobs:
   pick:
@@ -46,12 +58,71 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       packages: ${{ steps.queue.outputs.packages }}
-      count: ${{ steps.queue.outputs.count }}
+      count: ${{ steps.queue.outputs.count || '0' }}
       remaining: ${{ steps.queue.outputs.remaining }}
     steps:
       - uses: actions/checkout@v4
 
+      - id: gap
+        name: Long enough since the last one landed?
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, urllib.request, urllib.error
+          from datetime import datetime, timezone
+
+          approved = json.load(open("approved.json"))
+          # The account's own history is the only honest clock: PyPI records an upload
+          # time per release, so the newest one across everything we have published is
+          # when the last project was actually created.
+          newest = None
+          for name in approved + json.load(open("published_names.json", encoding="utf-8")):
+              try:
+                  with urllib.request.urlopen(
+                      f"https://pypi.org/pypi/{name}/json", timeout=20
+                  ) as response:
+                      data = json.load(response)
+              except Exception:
+                  continue
+              for files in data.get("releases", {}).values():
+                  for item in files:
+                      stamp = item.get("upload_time_iso_8601") or item.get("upload_time")
+                      if not stamp:
+                          continue
+                      stamp = stamp.replace("Z", "+00:00")
+                      try:
+                          when = datetime.fromisoformat(stamp)
+                      except ValueError:
+                          continue
+                      if when.tzinfo is None:
+                          when = when.replace(tzinfo=timezone.utc)
+                      if newest is None or when > newest:
+                          newest = when
+
+          gap_hours = float(os.environ.get("MIN_GAP_HOURS", "26") or "26")
+          if newest is None:
+              print("ready=true")
+              print("since=unknown")
+          else:
+              hours = (datetime.now(timezone.utc) - newest).total_seconds() / 3600.0
+              print(f"ready={'true' if hours >= gap_hours else 'false'}")
+              print(f"since={hours:.1f}")
+          PY
+
+      - name: Stand down if it is too soon
+        if: ${{ steps.gap.outputs.ready != 'true' && !inputs.force }}
+        shell: bash
+        run: |
+          echo "### Standing down" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Last publish was ${{ steps.gap.outputs.since }} hours ago; this run waits for" >> "$GITHUB_STEP_SUMMARY"
+          echo "$MIN_GAP_HOURS. PyPI refuses new projects for most of a day after a batch, and" >> "$GITHUB_STEP_SUMMARY"
+          echo "retrying into a closed window is the pattern its limiter watches for." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Run this workflow manually with **force** to override." >> "$GITHUB_STEP_SUMMARY"
+
       - id: queue
+        if: ${{ steps.gap.outputs.ready == 'true' || inputs.force }}
         name: Approved, minus whatever is already live
         shell: bash
         run: |
