@@ -18,5 +18,8 @@
   "multilingual-text",
   "image-redactor",
   "camera-health",
-  "voice-activity-ai"
+  "voice-activity-ai",
+  "speech-quality",
+  "ocr-cleaner",
+  "vision-anomaly"
 ]

@@ -45,11 +45,16 @@ SMOOTH_BINS = 5
 
 
 def _unmeasured(name: str, unit: str, reason: str) -> Metric:
-    """A measure the recording could not support, scored neutrally and said so."""
+    """A measure the recording could not support, scored neutrally and said so.
+
+    ``ok`` is ``None`` rather than True: the measurement was not taken, so it
+    passed nothing, and a reader scanning the pass column of a summary must not
+    come away thinking it did.
+    """
     return Metric(
         value=None,
         score=NEUTRAL_SCORE,
-        ok=True,
+        ok=None,
         message=reason,
         name=name,
         unit=unit,
@@ -178,8 +183,12 @@ def measure_clipping(audio: Audio, thresholds: Thresholds) -> Metric:
     Returns:
         A metric whose value is the share of clipped samples, 0.0 to 1.0.
     """
-    magnitude = np.abs(audio.samples)
-    hits = magnitude >= float(thresholds.clip_level)
+    level = float(thresholds.clip_level)
+    rail = float(getattr(audio, "positive_rail", 1.0) or 1.0)
+    # Each side against its own rail. With one fixed level of 0.995, an 8-bit file -
+    # whose positive side tops out at 0.992 - could never register positive clipping,
+    # so a recording clipped on both sides reported exactly half of it.
+    hits = (audio.samples >= level * rail) | (audio.samples <= -level)
     count = int(np.count_nonzero(hits))
     share = float(count) / float(audio.n_samples)
     runs, longest = _clipped_runs(hits)
@@ -703,10 +712,18 @@ def measure_bandwidth(
     nyquist = float(audio.sample_rate) / 2.0
     share = bandwidth / nyquist if nyquist > 0.0 else 0.0
     telephone = bandwidth <= float(thresholds.telephone_band_hz)
-    upsampled = bool(
-        share < float(thresholds.upsampled_nyquist_share)
-        and nyquist > float(thresholds.telephone_band_hz)
-    )
+    # "Upsampled" means telephone-band CONTENT sitting in a file that could have held
+    # far more - a phone call saved as a 48 kHz WAV. It used to mean "fills under 55% of
+    # Nyquist", which condemned every ordinary voice recorded at 48 kHz: speech lives
+    # below about 8 kHz whatever the format, so a clean studio voice fills a third of
+    # the band at most. The band edge that actually costs a transcriber its consonants is
+    # absolute, not a share, so that is what is tested. A native 8 kHz file cannot hold
+    # more than telephone band and is judged on its own merits instead.
+    # The file must be able to hold meaningfully more than telephone band for the
+    # narrow content to be a loss. A native 8 kHz file tops out at 4 kHz, so phone
+    # audio is all it can ever carry; a 16 kHz file can reach 8 kHz, so phone audio
+    # inside one really has thrown detail away.
+    upsampled = bool(telephone and nyquist > 1.25 * float(thresholds.telephone_band_hz))
 
     score = piecewise(
         bandwidth,
@@ -726,11 +743,10 @@ def measure_bandwidth(
 
     if upsampled:
         message = (
-            "nothing above {:.0f} Hz carries energy, only {:.0%} of the {:.0f} Hz this "
-            "file's {} Hz sample rate allows; the audio was band-limited or upsampled "
-            "from a narrower original, and that detail is not coming back".format(
-                bandwidth, share, nyquist, audio.sample_rate
-            )
+            "telephone-band audio in a {} Hz file: nothing above {:.0f} Hz carries energy, "
+            "though the file could hold {:.0f} Hz. It was recorded or passed through a "
+            "phone line and upsampled afterwards, and the consonants that lived above that "
+            "edge are not coming back".format(audio.sample_rate, bandwidth, nyquist)
         )
     elif telephone and not ok:
         message = (

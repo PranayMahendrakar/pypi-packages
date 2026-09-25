@@ -1,0 +1,63 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vision-anomaly"
+version = "0.1.0"
+description = "Spot unusual images against a set of normal ones, without labelled defects"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Pranay Mahendrakar" }]
+keywords = [
+  "anomaly-detection",
+  "outlier-detection",
+  "image-anomaly",
+  "novelty-detection",
+  "unsupervised",
+  "visual-inspection",
+  "quality-control",
+  "computer-vision",
+  "image-features",
+  "no-labels",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Manufacturing",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Image Recognition",
+  "Topic :: Multimedia :: Graphics",
+]
+dependencies = [
+  "numpy>=1.23",
+  "Pillow>=9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+vision-anomaly = "vision_anomaly.cli:main"
+
+[project.urls]
+Homepage = "https://pypi.org/project/vision-anomaly/"
+Author = "https://pypi.org/user/pranaymahendrakar/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vision_anomaly"]
+
+# Spelled out because this folder is not its own git repository. Hatchling walks
+# up to the enclosing project for a .gitignore, uses it to decide what to pack,
+# and ships a copy of whichever one it found inside the sdist - so without the
+# .gitignore beside this file, every sdist would carry the parent project's
+# build-infrastructure rules. Listing the contents here as well means a stray
+# file in this folder cannot find its way into a release either.
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/tests", "/README.md", "/LICENSE", "/pyproject.toml"]

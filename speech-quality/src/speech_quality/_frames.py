@@ -22,10 +22,18 @@ import numpy as np
 from ._scoring import dbfs_array
 from .thresholds import Thresholds
 
-__all__ = ["Frames", "Spectra", "frame_signal", "take_spectra"]
+__all__ = ["Frames", "Spectra", "frame_peaks", "frame_signal", "take_spectra"]
 
 MIN_FRAME_LENGTH = 16
 """No frame is shorter than this, whatever the sample rate works out to."""
+
+PEAK_BLOCK_SAMPLES = 1 << 20
+"""Most samples one peak-per-frame block may hold: 8 MB of float64, whatever the
+recording is. Frames overlap, so materialising them all at once costs frames x
+frame_length rather than samples - twice the audio at the default 2:1 overlap,
+2.8 GB for an hour of 48 kHz interview, which is a MemoryError on a small
+laptop. The peak is taken a block at a time instead, and this is the ceiling on
+that block."""
 
 
 @dataclass
@@ -135,6 +143,42 @@ def _frame_geometry(n_samples: int, sample_rate: int, thresholds: Thresholds) ->
     return length, hop
 
 
+def _peak_block_frames(length: int) -> int:
+    """How many frames to take the peak of at once, so the temporary stays bounded."""
+    return max(1, int(PEAK_BLOCK_SAMPLES // max(1, int(length))))
+
+
+def frame_peaks(signal: np.ndarray, starts: np.ndarray, length: int) -> np.ndarray:
+    """The largest absolute sample in each frame, in blocks.
+
+    ``sliding_window_view`` hands back every frame as a view costing nothing,
+    but indexing that view with the frame starts copies: frames x frame_length
+    floats, which for overlapping frames is a multiple of the recording itself.
+    Copying one bounded block at a time gives the same answer for a temporary
+    that never exceeds :data:`PEAK_BLOCK_SAMPLES` however long the recording is.
+
+    The block's largest and smallest values answer the same question as the
+    largest absolute value, which saves taking ``abs`` of the whole signal.
+
+    Args:
+        signal: one-dimensional float samples.
+        starts: first sample index of each frame; every frame must fit.
+        length: frame length in samples.
+
+    Returns:
+        One peak amplitude per frame, as float64.
+    """
+    length = int(length)
+    windows = np.lib.stride_tricks.sliding_window_view(signal, length)
+    peak = np.empty(int(starts.size), dtype=np.float64)
+    step = _peak_block_frames(length)
+    for begin in range(0, int(starts.size), step):
+        end = min(begin + step, int(starts.size))
+        block = windows[starts[begin:end]]
+        np.maximum(block.max(axis=1), -block.min(axis=1), out=peak[begin:end])
+    return peak
+
+
 def frame_signal(samples: np.ndarray, sample_rate: int, thresholds: Thresholds) -> Frames:
     """Cut the signal into overlapping frames and measure the level of each.
 
@@ -145,7 +189,9 @@ def frame_signal(samples: np.ndarray, sample_rate: int, thresholds: Thresholds) 
 
     Returns:
         The frames and their levels. A recording shorter than one frame becomes
-        a single frame holding all of it.
+        a single frame holding all of it. The working memory is one array the
+        size of the signal plus one bounded block, never frames x frame_length,
+        so an hour-long interview frames on an ordinary laptop.
     """
     signal = np.asarray(samples, dtype=np.float64)
     n_samples = int(signal.size)
@@ -161,12 +207,17 @@ def frame_signal(samples: np.ndarray, sample_rate: int, thresholds: Thresholds) 
         starts = np.arange(0, last + 1, hop, dtype=np.int64)
         if int(starts[-1]) != last:
             starts = np.append(starts, last)
-        # A running sum of squares makes every frame energy one subtraction.
-        cumulative = np.concatenate(([0.0], np.cumsum(signal * signal)))
+        # A running sum of squares makes every frame energy one subtraction. The
+        # squares are written straight into the running total and summed in
+        # place, so framing an hour-long interview holds one array beside the
+        # audio rather than three.
+        cumulative = np.empty(n_samples + 1, dtype=np.float64)
+        cumulative[0] = 0.0
+        np.multiply(signal, signal, out=cumulative[1:])
+        np.cumsum(cumulative[1:], out=cumulative[1:])
         energy = np.maximum(cumulative[starts + length] - cumulative[starts], 0.0)
         divisor = np.full(starts.size, float(length), dtype=np.float64)
-        windows = np.lib.stride_tricks.sliding_window_view(np.abs(signal), length)
-        peak = np.asarray(windows[starts].max(axis=1), dtype=np.float64)
+        peak = frame_peaks(signal, starts, length)
 
     rms = np.sqrt(energy / divisor)
     return Frames(

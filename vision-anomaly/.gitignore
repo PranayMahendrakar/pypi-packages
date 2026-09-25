@@ -1,0 +1,14 @@
+# Build output. The wheel and sdist are built from this source on release, so a
+# copy committed here could silently differ from the code beside it.
+dist/
+build/
+*.egg-info/
+src/*.egg-info/
+
+# Python noise
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environments, if anyone makes one in here rather than in _venvs/
+.venv*/

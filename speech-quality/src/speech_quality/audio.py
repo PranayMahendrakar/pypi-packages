@@ -62,6 +62,11 @@ class Audio:
     source: Optional[str] = None
     notes: List[str] = field(default_factory=list)
     assumed_sample_rate: bool = False
+    #: The largest positive value the source format can represent. Integer PCM is
+    #: asymmetric: 8-bit stops at 127/128 on the positive side while the negative rail
+    #: reaches -1.0 exactly. Clipping has to be measured against the rail the format
+    #: actually has, or the positive half of a clipped 8-bit file is simply invisible.
+    positive_rail: float = 1.0
 
     @property
     def n_samples(self) -> int:
@@ -144,6 +149,39 @@ def _decode_frames(raw: bytes, width: int) -> np.ndarray:
     )
 
 
+def _truncation_note(
+    raw_bytes: int, width: int, channels: int, declared: int, rate: int
+) -> List[str]:
+    """A note when the header promises more audio than the file actually holds.
+
+    A valid header over a short body is what a copy interrupted part way through
+    leaves behind. :mod:`wave` hands over the bytes that are there without
+    complaint, so five milliseconds of a four-second recording would otherwise
+    be assessed as a perfectly good five-millisecond recording.
+
+    Args:
+        raw_bytes: how many bytes of frame data were actually read.
+        width: bytes per sample.
+        channels: channels declared in the header.
+        declared: frame count declared in the header.
+        rate: frames per second declared in the header.
+
+    Returns:
+        One note, or an empty list when the file holds what it promised.
+    """
+    frame_bytes = int(width) * max(1, int(channels))
+    if frame_bytes <= 0 or rate <= 0 or declared <= 0:
+        return []
+    held = int(raw_bytes) // frame_bytes
+    if held >= int(declared):
+        return []
+    return [
+        "the file declares {:.3f} s but holds {:.3f} s; it looks truncated".format(
+            float(declared) / float(rate), float(held) / float(rate)
+        )
+    ]
+
+
 def read_wav(path: Union[str, "os.PathLike[str]"]) -> Audio:
     """Read a PCM WAV file with the standard library, no audio dependency.
 
@@ -151,7 +189,8 @@ def read_wav(path: Union[str, "os.PathLike[str]"]) -> Audio:
         path: a ``.wav`` file. Multi-channel files are mixed down to mono.
 
     Returns:
-        The recording as :class:`Audio`.
+        The recording as :class:`Audio`. A file holding fewer frames than its
+        header declares is read as far as it goes, with a note saying so.
 
     Raises:
         FileNotFoundError: no file at that path.
@@ -159,10 +198,12 @@ def read_wav(path: Union[str, "os.PathLike[str]"]) -> Audio:
             WAV (compressed, float and extensible formats included).
     """
     text = os.fspath(path)
-    if os.path.splitext(text)[1].lower() not in WAV_SUFFIXES:
-        raise _unsupported_path(text)
+    # The directory check comes first: a folder is not a file with a bad suffix,
+    # and "." should not be told it has none.
     if os.path.isdir(text):
         raise ValueError("{} is a directory, not a WAV file".format(text))
+    if os.path.splitext(text)[1].lower() not in WAV_SUFFIXES:
+        raise _unsupported_path(text)
     if not os.path.exists(text):
         raise FileNotFoundError("no such file: {}".format(text))
 
@@ -199,6 +240,7 @@ def read_wav(path: Union[str, "os.PathLike[str]"]) -> Audio:
 
     flat = _decode_frames(raw, width)
     notes = ["read as {}-bit PCM WAV".format(SAMPLE_WIDTHS[width])]
+    notes.extend(_truncation_note(len(raw), width, channels, count, rate))
     if channels > 1:
         usable = (flat.size // channels) * channels
         if usable != flat.size:
@@ -206,13 +248,16 @@ def read_wav(path: Union[str, "os.PathLike[str]"]) -> Audio:
         flat = flat[:usable].reshape(-1, channels).mean(axis=1)
         notes.append("{} channels were mixed down to mono by averaging them".format(channels))
 
-    return _finish(
+    audio = _finish(
         np.array(flat, dtype=np.float64, copy=True),
         int(rate),
         channels=channels,
         source=os.path.basename(text),
         notes=notes,
     )
+    bits = 8 * int(width)
+    audio.positive_rail = float((1 << (bits - 1)) - 1) / float(1 << (bits - 1))
+    return audio
 
 
 def _as_pair(value: Any) -> Optional[Tuple[Any, Any]]:

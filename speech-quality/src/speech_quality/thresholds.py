@@ -48,6 +48,21 @@ MEASURE_WEIGHTS = {
 }
 """How much each measure pulls on the overall score."""
 
+DECISIVE_MEASURES = ("clipping", "noise", "speech", "bandwidth")
+"""The measures whose failure settles the verdict on its own.
+
+A weighted average cannot express "this one thing is fatal": no measure carries
+enough of the total weight to drag a recording under the usable line by itself,
+so a take that is perfect apart from being 7% clipped still averages out
+respectably. These four are the faults nothing later puts right - clipped
+samples are a destroyed waveform, noise under the voice is already mixed in, a
+recording that does not behave like speech has nothing to transcribe, and a band
+that stops at 3.4 kHz has lost its consonants. Level and silence describe faults
+a later pass does fix, by raising the gain or trimming the dead air, and heavy
+compression is a production choice rather than damage, so those three are left
+to the average.
+"""
+
 
 @dataclass
 class Thresholds:

@@ -11,9 +11,19 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from ._scoring import clamp, round_or_none
-from .thresholds import MEASURE_WEIGHTS, MEASURES, grade_for
+from .thresholds import DECISIVE_MEASURES, MEASURE_WEIGHTS, MEASURES, grade_for
 
-__all__ = ["Metric", "AudioReport", "BatchReport", "overall_score"]
+__all__ = [
+    "Metric",
+    "AudioReport",
+    "BatchReport",
+    "blocking_measures",
+    "measured_coverage",
+    "overall_score",
+]
+
+MIN_COVERAGE = 0.5
+"""Share of the measure weight that must have been taken for a verdict to mean anything."""
 
 
 @dataclass
@@ -24,7 +34,9 @@ class Metric:
         value: the headline raw number, in the unit named by ``unit``. ``None``
             when the recording gave nothing to measure.
         score: 0-100, higher is better.
-        ok: True when this measure is not a problem.
+        ok: True when this measure is not a problem, False when it is, and
+            ``None`` when the measure could not be taken at all - which is not
+            a pass and must not read as one.
         message: one sentence a human can act on.
         name: which measure this is.
         unit: the unit ``value`` is in, such as ``"dBFS"`` or ``"share"``.
@@ -36,7 +48,7 @@ class Metric:
 
     value: Optional[float]
     score: float
-    ok: bool
+    ok: Optional[bool]
     message: str
     name: str = ""
     unit: str = ""
@@ -45,7 +57,7 @@ class Metric:
 
     def __post_init__(self) -> None:
         self.score = clamp(self.score)
-        self.ok = bool(self.ok)
+        self.ok = None if self.ok is None else bool(self.ok)
         self.measured = bool(self.measured)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -55,7 +67,7 @@ class Metric:
             "value": round_or_none(self.value),
             "unit": self.unit,
             "score": round(float(self.score), 1),
-            "ok": bool(self.ok),
+            "ok": None if self.ok is None else bool(self.ok),
             "measured": bool(self.measured),
             "message": self.message,
             "details": dict(self.details),
@@ -71,10 +83,77 @@ class Metric:
             shown = "{:.0f} {}".format(float(self.value), self.unit).strip()
         else:
             shown = "{:.2f} {}".format(float(self.value), self.unit).strip()
-        mark = "ok  " if self.ok else "FAIL"
+        if self.ok is None:
+            # Not a pass and not a failure: nothing was measured, and a reader
+            # scanning this column must not come away thinking it passed.
+            mark = "--  "
+        else:
+            mark = "ok  " if self.ok else "FAIL"
         return "  {} {:<10} {:>5.1f}  {:<14} {}".format(
             mark, self.name, self.score, shown, self.message
         )
+
+
+def measured_coverage(metrics: Dict[str, Metric]) -> float:
+    """How much of the measure weight was actually taken, 0.0 to 1.0.
+
+    A recording too short, too quiet or too strange for most of the measures
+    comes back with neutral placeholder scores, which average out to a
+    respectable-looking number that means nothing. Coverage is what lets a
+    report refuse to call such a recording usable.
+
+    Args:
+        metrics: the measures, keyed by name.
+
+    Returns:
+        The measured share of the total weight; ``0.0`` for an empty mapping.
+    """
+    measured = 0.0
+    total = 0.0
+    for name, metric in metrics.items():
+        weight = float(MEASURE_WEIGHTS.get(name, 1.0))
+        total += weight
+        if metric.measured:
+            measured += weight
+    if total <= 0.0:
+        return 0.0
+    return measured / total
+
+
+def blocking_measures(metrics: Dict[str, Metric]) -> List[str]:
+    """The decisive measures that failed, in reading order.
+
+    A weighted average lets six good measures carry one catastrophic one: with
+    the shipped weights a single measure scoring zero still leaves the overall
+    score in the eighties, so a 7% clipped take, a telephone-band file and a
+    recording that is not speech at all all came back "usable". The measures
+    named in :data:`~speech_quality.thresholds.DECISIVE_MEASURES` describe
+    faults nothing later puts right, so one of them failing settles the verdict
+    on its own.
+
+    Args:
+        metrics: the measures, keyed by name.
+
+    Returns:
+        The names that failed, in the order the report reads them. A measure
+        that could not be taken never blocks: it has nothing to report, which
+        is not the same as failing.
+    """
+    return [
+        name
+        for name in DECISIVE_MEASURES
+        if name in metrics and metrics[name].measured and not metrics[name].ok
+    ]
+
+
+def _join(names: Sequence[str]) -> str:
+    '''"a", "a and b", or "a, b and c".'''
+    items = [str(name) for name in names]
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    return "{} and {}".format(", ".join(items[:-1]), items[-1])
 
 
 def overall_score(metrics: Dict[str, Metric]) -> float:
@@ -104,8 +183,13 @@ class AudioReport:
     Attributes:
         score: 0-100 overall, the weighted average of the measures.
         grade: "A" (best) through "F".
-        usable: True when the recording is good enough to transcribe or publish.
+        usable: True when the recording is good enough to transcribe or
+            publish: the overall score clears ``usable_score``, the recording
+            is not digital silence, most of the measures could be taken, and
+            none of the decisive measures failed.
         metrics: every measure, keyed by name.
+        blocking: the decisive measures that failed, which is why ``usable``
+            can be False on a recording whose overall score looks respectable.
         issues: what is wrong, worst first, one sentence each.
         notes: decisions taken while loading, such as a stereo mixdown.
         source: a label for the recording, usually the file name.
@@ -113,6 +197,9 @@ class AudioReport:
         sample_rate: samples per second.
         channels: channels in the source, before any mixdown.
         digital_silence: True when every sample was exactly zero.
+        coverage: share of the measure weight that could actually be taken.
+            Below :data:`MIN_COVERAGE` the recording is never called usable,
+            because most of the score would be placeholder.
     """
 
     score: float
@@ -121,11 +208,13 @@ class AudioReport:
     metrics: Dict[str, Metric]
     issues: List[str] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
+    blocking: List[str] = field(default_factory=list)
     source: Optional[str] = None
     duration: float = 0.0
     sample_rate: int = 0
     channels: int = 1
     digital_silence: bool = False
+    coverage: float = 1.0
 
     @property
     def label(self) -> str:
@@ -153,7 +242,9 @@ class AudioReport:
             "score": round(float(self.score), 1),
             "grade": self.grade,
             "usable": bool(self.usable),
+            "blocking": list(self.blocking),
             "digital_silence": bool(self.digital_silence),
+            "coverage": round(float(self.coverage), 4),
             "duration_s": round(float(self.duration), 4),
             "sample_rate": int(self.sample_rate),
             "channels": int(self.channels),
@@ -173,7 +264,19 @@ class AudioReport:
             self.sample_rate,
             "mono" if self.channels <= 1 else "{} channels".format(self.channels),
         )
-        lines = [head, shape, "measures:"]
+        lines = [head, shape]
+        if self.blocking:
+            lines.append(
+                "  not usable: {} failed, and no later pass puts that right".format(
+                    _join(self.blocking)
+                )
+            )
+        if self.coverage < 1.0:
+            lines.append(
+                "  {:.0%} of the measures could be taken; the rest had nothing to work "
+                "with".format(self.coverage)
+            )
+        lines.append("measures:")
         for name in MEASURES:
             if name in self.metrics:
                 lines.append(self.metrics[name].line())
@@ -308,10 +411,22 @@ def build_report(
         usable_score: the score at or above which a recording is usable.
 
     Returns:
-        The finished report.
+        The finished report. Digital silence scores 0 whatever the individual
+        measures said, a recording most of the measures could not touch is
+        never called usable, and neither is one where a decisive measure
+        failed, however well the other six average out.
     """
-    score = overall_score(metrics)
-    usable = bool(score >= float(usable_score) and not digital_silence)
+    coverage = measured_coverage(metrics)
+    # Digital silence has no quality to score: saying "48 out of 100" about a file
+    # of zeros would be arithmetic pretending to be a judgement.
+    score = 0.0 if digital_silence else overall_score(metrics)
+    blocking = blocking_measures(metrics)
+    usable = bool(
+        score >= float(usable_score)
+        and not digital_silence
+        and coverage >= MIN_COVERAGE
+        and not blocking
+    )
     return AudioReport(
         score=score,
         grade=grade_for(score),
@@ -319,9 +434,11 @@ def build_report(
         metrics=metrics,
         issues=list(issues),
         notes=list(notes),
+        blocking=blocking,
         source=source,
         duration=float(duration),
         sample_rate=int(sample_rate),
         channels=int(channels),
         digital_silence=bool(digital_silence),
+        coverage=coverage,
     )
