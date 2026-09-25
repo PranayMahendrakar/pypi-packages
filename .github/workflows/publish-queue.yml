@@ -184,3 +184,38 @@ jobs:
           echo "  Usually PyPI's new-project rate limit. The next run in four hours retries." >> "$GITHUB_STEP_SUMMARY"
           echo "  If it never lands, read the upload log: a name rejected as 'too similar to an" >> "$GITHUB_STEP_SUMMARY"
           echo "  existing project' needs renaming and will never succeed on retry." >> "$GITHUB_STEP_SUMMARY"
+
+  report:
+    name: What actually published
+    needs: [pick, publish]
+    if: ${{ always() && needs.pick.outputs.count != '0' && !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Count what landed
+        shell: bash
+        run: |
+          # The publish jobs go green even when PyPI refuses, because a closed window is
+          # an ordinary condition rather than a broken build. That made every run read as
+          # "success" while nothing shipped, which is worse than a red X: it answers the
+          # question you were actually asking with the wrong word. So the real count gets
+          # its own job, and the job fails when a whole batch was refused - not because
+          # anything is broken, but because "nothing published" should not look identical
+          # to "everything published".
+          published=0
+          refused=0
+          for name in $(python -c "import json;print(' '.join(json.load(open('approved.json'))))"); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/$name/json")
+            if [ "$code" = "200" ]; then published=$((published+1)); else refused=$((refused+1)); fi
+          done
+          echo "## Result" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**$published** of the queue are now on PyPI; **$refused** still waiting." >> "$GITHUB_STEP_SUMMARY"
+          if [ "$published" = "0" ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Nothing published this run. PyPI answers *429 Too many new projects created*" >> "$GITHUB_STEP_SUMMARY"
+            echo "while its window is shut; it does not say for how long. The next run tries again" >> "$GITHUB_STEP_SUMMARY"
+            echo "in four hours. Nothing here needs fixing." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
