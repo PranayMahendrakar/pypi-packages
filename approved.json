@@ -30,5 +30,7 @@
   "speaker-diarize-lite",
   "voice-commands-ai",
   "call-ai-metrics",
-  "offline-stt-router"
+  "offline-stt-router",
+  "audio-anomaly",
+  "production-anomaly"
 ]

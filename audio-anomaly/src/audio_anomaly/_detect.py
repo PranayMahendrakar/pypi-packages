@@ -131,6 +131,16 @@ IMPACT_POOLED_FLOOR = 0.5
 #: be the machine's normal sound.
 MANY_BURSTS = 6
 
+#: At least this many recurring level_drop/dropout events before a stable period is
+#: considered evidence of beating rather than coincidence.
+MIN_PERIODIC_DIPS = 3
+#: How much the gap between consecutive dips may vary (coefficient of variation) and
+#: still count as "the same period". Beating is a physical near-sinusoid; 15% covers
+#: real recordings without accepting a run of independent, unrelated faults.
+PERIODIC_GAP_CV = 0.15
+#: Same idea for how similar each dip's depth must be.
+PERIODIC_DEPTH_CV = 0.35
+
 
 @dataclass
 class Profile:
@@ -1190,6 +1200,37 @@ def analyse_loaded(
             "impacts; if impacts are part of this machine's normal sound, pass the "
             "reference recording itself so that its impacts are learned too"
         )
+    # ---------------------------------------------------------- periodic dips
+    # A hum built from two close but slightly different frequencies beats: its
+    # envelope naturally dips to near-zero on a regular cycle (two motors at 120 and
+    # 120.5 Hz beat once every 2 s), and every one of those dips looked identical to
+    # a real level_drop or dropout fault from a local, before/after comparison - so a
+    # perfectly healthy twin-motor recording raised one false alarm every beat cycle,
+    # even against a clean reference of the same machine, because the comparison is
+    # inherently local and a reference does not change that. Three or more level_drop
+    # / dropout events recurring at a near-constant interval, at a near-constant
+    # depth, are amplitude modulation - a property of the sound, not independent
+    # faults - and are reported once as a note rather than as repeated anomalies.
+    # Events that do not share a stable period (including a genuine one-off fault
+    # that happens to be followed by an unrelated later one) are left exactly alone.
+    drop_like = sorted(
+        (e for e in events if e.kind in ("level_drop", "dropout")), key=lambda e: e.start_s
+    )
+    if len(drop_like) >= MIN_PERIODIC_DIPS:
+        gaps = np.diff([e.start_s for e in drop_like])
+        depths = np.array([e.score for e in drop_like])
+        gap_cv = float(np.std(gaps) / np.mean(gaps)) if np.mean(gaps) > 0 else 1.0
+        depth_cv = float(np.std(depths) / np.mean(depths)) if np.mean(depths) > 0 else 1.0
+        if gap_cv <= PERIODIC_GAP_CV and depth_cv <= PERIODIC_DEPTH_CV:
+            period = float(np.mean(gaps))
+            events = [e for e in events if e not in drop_like]
+            notes.append(
+                "%d level drops recur every %.2fs (+/- %.0f%%): this is a beating or "
+                "modulated hum - two close frequencies (like two motors slightly out "
+                "of sync) create a naturally periodic dip, not %d separate faults. "
+                "Reported once, not as repeated anomalies."
+                % (len(drop_like), period, 100.0 * gap_cv, len(drop_like))
+            )
     covered = _interval_union([(e.start_s, e.end_s) for e in events])
     ratio = float(min(1.0, covered / duration)) if duration > 0 else 0.0
     if profile is None and can_self and n_live * hop_s < ROUGH_BELOW_S:

@@ -83,12 +83,31 @@ def _runs(mask: np.ndarray) -> List[Tuple[int, int]]:
 
 
 def _robust(values: np.ndarray) -> Tuple[Optional[float], float]:
-    """(median, MAD-based standard deviation) of the finite values, or (None, 0)."""
+    """(median, standard deviation) of the finite values, or (None, 0).
+
+    Real-world production counts are almost always whole numbers, and MAD-based
+    sigma (1.4826 * median absolute deviation) is a badly biased estimator on
+    rounded/integer data: rounding piles many values onto the exact median, so the
+    "typical absolute deviation" collapses well below the true spread. On a
+    perfectly healthy line - mean 20 units/min, true sd 2, whole-number counts,
+    seven days of one-minute data - that bias alone turned a legitimate spread of
+    2.0 into an estimate of 1.48, and because the micro-stop threshold multiplies
+    sigma by 4, a 26% underestimate in sigma became a threshold nearly two units
+    too tight: 20 false "micro-stops" a week on data with nothing wrong on it,
+    against 0.2 when the same values were left as floats.
+
+    By the point sigma is estimated here, the values passed in have already had
+    near-zero and spike intervals filtered out (see the call sites), so the
+    outlier-robustness a median-based estimator exists for is already provided by
+    that filtering - and plain standard deviation does not have the ties-collapse
+    problem MAD has on quantized data. It is the plain measure of spread used here.
+    """
     values = values[np.isfinite(values)]
     if values.size == 0:
         return None, 0.0
     centre = float(np.median(values))
-    return centre, float(1.4826 * np.median(np.abs(values - centre)))
+    spread = float(np.std(values, ddof=0)) if values.size > 1 else 0.0
+    return centre, spread
 
 
 def _positive(name: str, value: Any, allow_none: bool = True) -> Optional[float]:

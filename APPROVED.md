@@ -187,3 +187,28 @@ A package earns its place in this file only after ALL of the following:
   offline-stt-router** - all clean on first review. 84-215 tests each, honest READMEs about what
   their classical/heuristic methods can and cannot do, and an `embed=`/`detector=` hook in each
   for a real model to be substituted in.
+
+- **production-anomaly** - FIXED, was pulled back out of the queue after independent review
+  found a blocker. A healthy machine-paced line with rounded (whole-number) counts got a
+  steady stream of false micro-stops: ~29/week on mean 20/min, true sd 2, vs 0.2/week for the
+  identical values left as floats. Root cause: MAD-based sigma (1.4826 * median absolute
+  deviation) is badly biased on rounded data, because rounding piles many values onto the exact
+  median and collapses the "typical deviation" below the true spread - a 26% underestimate that,
+  multiplied by 4 in the micro-stop threshold, tightened the cutoff into ordinary statistical
+  noise. The same bias fed the slow-running check, which flagged healthy 15-min/hourly lines with
+  realistic (10-15%) noise. Switched from MAD to plain standard deviation: by the point sigma is
+  estimated, near-zero and spike intervals are already filtered out, so MAD's outlier-robustness
+  was redundant while its collapse-under-ties problem was live. A genuine 40-minute stoppage is
+  still caught. Verified across 20+ seeds at multiple frequencies; 139 tests pass.
+
+- **audio-anomaly** - FIXED, also pulled back for review findings. Two majors, one root cause.
+  A hum built from two close frequencies (two motors at 120 and 120.5 Hz, beating once every 2s)
+  raised a false level_drop alarm on every beat cycle - even against a clean reference of the
+  same machine, because the drop detector compares each frame to its own local neighbours and a
+  reference does not change that. Three or more level_drop/dropout events now checked for a
+  stable recurring period (interval and depth both low-variance); when found, they are reported
+  once as an explanatory note rather than as N separate alarms. Honest limit documented in the
+  README: a genuinely periodic mechanical fault at a stable interval looks the same as beating to
+  this detector and gets the same treatment - the note is never suppressed, so the pattern stays
+  visible, but it is not escalated to repeated alarms. Single and irregularly-spaced real drops
+  are unaffected and still caught. 181 tests pass.

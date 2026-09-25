@@ -182,3 +182,67 @@ def test_steady_high_count_line_is_not_merged():
     report = pa.analyze(line(days=1))
     assert report.interval_minutes == 1
     assert not any("counts are low" in n for n in report.notes)
+
+
+def test_a_healthy_line_with_rounded_counts_is_not_full_of_micro_stops():
+    """Regression: MAD-based sigma is badly biased on rounded/integer data - rounding
+    piles many values onto the exact median, collapsing the 'typical absolute
+    deviation' below the true spread. On mean 20/min, true sd 2, 7 days of 1-min
+    counts, that bias alone produced ~29 false micro-stops a week on data with
+    nothing wrong on it (0.2/week for the identical values left as floats)."""
+    import numpy as np
+    import pandas as pd
+
+    import production_anomaly as pa
+
+    for seed in range(10):
+        rng = np.random.default_rng(seed)
+        t = pd.date_range("2026-02-02", periods=7 * 1440, freq="1min")
+        u = np.round(rng.normal(20, 2, len(t)))
+        report = pa.analyze(pd.DataFrame({"time": t, "parts": u}))
+        micro = [s for s in report.stoppages if "micro" in str(s.kind).lower()]
+        assert len(micro) <= 2, f"seed {seed}: {len(micro)} false micro-stops on healthy data"
+
+
+def test_noisy_but_healthy_coarse_interval_lines_are_not_reported_as_slow():
+    """The same MAD bias fed the slow-running threshold: a healthy line sampled at
+    15-minute or hourly intervals, with realistic (10-15%) coefficient of variation,
+    was often reported as running slow purely from statistical noise."""
+    import numpy as np
+    import pandas as pd
+
+    import production_anomaly as pa
+
+    for seed in range(10):
+        rng = np.random.default_rng(1000 + seed)
+        t = pd.date_range("2026-02-02", periods=1440, freq="1h")
+        u = np.round(rng.normal(3600, 360, len(t)))
+        report = pa.analyze(pd.DataFrame({"t": t, "u": u}))
+        slow = [s for s in report.stoppages if "slow" in str(s.kind).lower()]
+        assert not slow, f"seed {seed}: healthy hourly data reported as slow"
+
+    for seed in range(10):
+        rng = np.random.default_rng(1000 + seed)
+        n = 96 * 28
+        t = pd.date_range("2026-02-02", periods=n, freq="15min")
+        u = np.round(rng.normal(900, 135, n))
+        report = pa.analyze(pd.DataFrame({"t": t, "u": u}))
+        slow = [s for s in report.stoppages if "slow" in str(s.kind).lower()]
+        assert not slow, f"seed {seed}: healthy 15-min data reported as slow"
+
+
+def test_a_genuine_stoppage_is_still_caught_after_the_sigma_fix():
+    """The fix must not blunt real detection: a clear, sustained downtime run must
+    still be found."""
+    import numpy as np
+    import pandas as pd
+
+    import production_anomaly as pa
+
+    rng = np.random.default_rng(0)
+    t = pd.date_range("2026-02-02", periods=7 * 1440, freq="1min")
+    u = np.round(rng.normal(20, 2, len(t)))
+    u[1000:1040] = 0  # a genuine 40-minute stoppage
+    report = pa.analyze(pd.DataFrame({"time": t, "parts": u}))
+    downtime = [s for s in report.stoppages if s.kind == "downtime"]
+    assert downtime, "a genuine 40-minute stoppage must still be reported"

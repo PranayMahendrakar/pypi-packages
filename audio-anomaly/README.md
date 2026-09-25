@@ -206,6 +206,24 @@ prints `audio-anomaly: error: ...` and exits with status 2, never 1, so a
 scheduled check cannot mistake a failure for a finding. Run
 `audio-anomaly --help` for the rest.
 
+## Limits
+
+- **Level drops that recur at a stable period are read as beating, not independent
+  faults.** Two close frequencies (two motors just out of sync, say) produce a level
+  that dips to near-zero on a completely regular cycle, and each dip looks identical
+  to a real drop from a local, before/after comparison - even against a clean
+  reference of the same machine, since that comparison is inherently local. Three or
+  more drops at a near-constant interval and depth are reported once, as a note
+  describing the period, rather than as repeated alarms.
+- **This means a genuinely periodic mechanical fault - a loose part striking on every
+  rotation, say - can look the same as beating and gets the same treatment: reported
+  once as a note, not as repeated anomalies.** Nothing in a level trace alone can
+  tell physical beating apart from a real fault that happens to recur at a stable
+  interval; that needs either a healthy reference recorded at the *same* speed and
+  load, or knowledge of the machine's own RPM. The note is never suppressed, so a
+  recurring pattern is always visible in the report - it is just not escalated to N
+  separate alarms.
+
 ## License
 
 MIT

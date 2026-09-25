@@ -228,3 +228,67 @@ def test_int64_and_integer_lists_get_their_bit_depth_inferred():
         report = audio_anomaly.detect(data, sample_rate=SR)
         assert [e.kind for e in report.anomalies] == ["burst"]
         assert any("fit 16-bit signed PCM" in n for n in report.notes)
+
+
+# --- regression: beating twin-motor hum raised a false alarm every beat cycle ------
+
+def test_beating_hum_is_not_a_stream_of_level_drop_alarms():
+    """Regression: two motors at 120 and 120.5 Hz beat once every 2 s, and every one
+    of those natural amplitude nulls looked like an independent level_drop fault -
+    even against a clean reference of the same machine, since the drop detector
+    compares each frame to its own local neighbours regardless of any reference."""
+    import numpy as np
+
+    import audio_anomaly as aa
+
+    sr = 16000
+    t = np.arange(10 * sr) / sr
+    rng = np.random.default_rng(0)
+    x = (
+        0.2 * np.sin(2 * np.pi * 120 * t)
+        + 0.14 * np.sin(2 * np.pi * 120.5 * t)
+        + 0.05 * np.sin(2 * np.pi * 240 * t)
+        + 0.01 * rng.normal(size=len(t))
+    )
+    ref_rng = np.random.default_rng(1)
+    ref = (
+        0.2 * np.sin(2 * np.pi * 120 * t + 1.0)
+        + 0.14 * np.sin(2 * np.pi * 120.5 * t + 2.0)
+        + 0.05 * np.sin(2 * np.pi * 240 * t)
+        + 0.01 * ref_rng.normal(size=len(t))
+    )
+    report = aa.detect(x, sample_rate=sr, reference=(ref, sr))
+    drops = [e for e in report.anomalies if "drop" in e.kind]
+    assert not drops, f"beating hum raised {len(drops)} false level_drop events"
+    assert any("beating" in note or "recur" in note for note in report.notes)
+
+
+def test_a_single_real_dropout_is_still_caught_after_the_periodicity_fix():
+    import numpy as np
+
+    import audio_anomaly as aa
+
+    sr = 16000
+    t = np.arange(10 * sr) / sr
+    rng = np.random.default_rng(0)
+    x = 0.2 * np.sin(2 * np.pi * 300 * t) + 0.01 * rng.normal(size=len(t))
+    x[3 * sr : int(3.5 * sr)] *= 0.05
+    report = aa.detect(x, sample_rate=sr)
+    drops = [e for e in report.anomalies if "drop" in e.kind]
+    assert drops, "a single genuine 0.5s dropout must still be reported"
+
+
+def test_two_irregularly_spaced_real_drops_are_not_mistaken_for_periodicity():
+    import numpy as np
+
+    import audio_anomaly as aa
+
+    sr = 16000
+    t = np.arange(10 * sr) / sr
+    rng = np.random.default_rng(0)
+    x = 0.2 * np.sin(2 * np.pi * 300 * t) + 0.01 * rng.normal(size=len(t))
+    x[int(1 * sr) : int(1.2 * sr)] *= 0.05
+    x[int(7 * sr) : int(7.3 * sr)] *= 0.05
+    report = aa.detect(x, sample_rate=sr)
+    drops = [e for e in report.anomalies if "drop" in e.kind]
+    assert len(drops) == 2, "two unrelated, irregularly-spaced real drops must both be found"
