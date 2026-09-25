@@ -95,7 +95,8 @@ INK_FLOOR_LEVEL = 0.03
 #: bank keeps every n-th column, each standing for n, which leaves the row
 #: sums - all a projection profile is - the same in expectation.
 MAX_BANK_PIXELS = 50_000
-#: The same limit for the one profile line heights are measured on.
+#: The same limit for the single profiles line heights and the up-down
+#: balance are read from: thinning by columns can alias with regular type.
 GEOMETRY_BANK_PIXELS = 400_000
 
 # -- which way up ----------------------------------------------------------
@@ -245,7 +246,6 @@ class ProfileBank:
         rows, columns = np.divmod(inked, self.width)
         self.columns = columns.astype(np.int64)
         self._base = rows.astype(np.int64) + self.margin
-        self._float_base = self._base.astype(np.float64)
         self._centred = columns.astype(np.float64) - (self.width - 1) / 2.0
 
     @property
@@ -274,7 +274,7 @@ class ProfileBank:
 
     def profile_fine(self, degrees: float) -> np.ndarray:
         """Row sums after shearing by ``degrees``, split between adjacent rows."""
-        rows = self._float_base + self._offsets(degrees)
+        rows = self._base.astype(np.float64) + self._offsets(degrees)
         lower = np.floor(rows)
         upper = self.weights * (rows - lower)
         index = lower.astype(np.int64)
@@ -888,14 +888,21 @@ def _read_axis(planes: PagePlanes, ink: InkPlanes, base: int) -> _Axis:
     axis = _Axis(base, ink, degrees, geometry, holds_text_lines(geometry, ink.work.shape[0]))
     if not axis.lines:
         return axis
-    if geometry.text_height and geometry.text_height >= DETAIL_MIN_ROWS:
+    native_rows = planes.lum.shape[0] if base % 180 == 0 else planes.lum.shape[1]
+    if (geometry.text_height and geometry.text_height >= DETAIL_MIN_ROWS) or (
+        native_rows < 1.25 * ink.work.shape[0]
+    ):
+        # The work plane already has the rows - tall type, or a page hardly
+        # bigger than the work plane - so there is nothing finer to build.
         detail, aspect = ink.work, 1.0
-        bank = ink.work_bank()
+        bank = ProfileBank(detail, max(abs(degrees), 0.01), aspect,
+                           max_pixels=GEOMETRY_BANK_PIXELS)
     else:
         detail, aspect = detail_ink(
             planes, ink.surface, ink.level, base // 90, geometry.text_height
         )
-        bank = ProfileBank(detail, max(abs(degrees), 0.01), aspect)
+        bank = ProfileBank(detail, max(abs(degrees), 0.01), aspect,
+                           max_pixels=GEOMETRY_BANK_PIXELS)
     if bank.usable:
         stretch = detail.shape[0] / float(ink.work.shape[0])
         pitch = geometry.pitch * stretch if geometry.pitch else None

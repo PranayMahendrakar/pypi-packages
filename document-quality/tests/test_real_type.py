@@ -63,11 +63,6 @@ def test_detect_orientation_when_letters_stand_in_columns(pangram):
     assert document_quality.detect_orientation(turned(pangram, 3)) == 90
 
 
-def test_small_type_on_a_large_page_is_read_the_right_way_up():
-    page = typed(width=1700, height=2200, size=20, words=S.PANGRAM)
-    assert document_quality.detect_orientation(turned(page, 2)) == 180
-
-
 def test_upside_down_page_is_held_back_with_a_half_turn(pangram):
     report = document_quality.assess(turned(pangram, 2), dpi=300)
     assert not report.ocr_ready

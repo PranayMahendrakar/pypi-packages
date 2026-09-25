@@ -293,6 +293,22 @@ def downscale_plane(lum: np.ndarray, long_edge: int) -> Tuple[np.ndarray, float]
     return plane, small.size[0] / float(width)
 
 
+def _shrink_plane(plane: np.ndarray, scale: float, long_edge: int) -> Tuple[np.ndarray, float]:
+    """``plane`` (already at ``scale`` of native) box-filtered down to ``long_edge``.
+
+    Shrinking the work plane rather than the native image gives the same
+    small plane for a fraction of the reading.
+    """
+    height, width = plane.shape
+    longest = max(height, width)
+    if long_edge <= 0 or longest <= long_edge:
+        return plane.copy(), scale
+    ratio = long_edge / float(longest)
+    target = (max(1, int(round(width * ratio))), max(1, int(round(height * ratio))))
+    small = Image.fromarray(np.ascontiguousarray(plane, dtype=np.float32)).resize(target, _BOX)
+    return np.asarray(small, dtype=np.float32).copy(), scale * small.size[0] / float(width)
+
+
 def colour_spread(image: Image.Image) -> float:
     """How far from neutral grey this page is: 0 a grey scan, 1 fully saturated.
 
@@ -300,6 +316,8 @@ def colour_spread(image: Image.Image) -> float:
     which paper and ink keep near zero even when the scanner was set to colour,
     and a photograph does not.
     """
+    if image.mode in ("1", "L", "LA", "I", "F") or image.mode.startswith("I;16"):
+        return 0.0                      # no colour channels, nothing to spread
     rgb = to_display_rgb(image)
     width, height = rgb.size
     longest = max(width, height)
@@ -467,7 +485,7 @@ def prepare(source: Any, dpi: Any = None) -> PagePlanes:
 
     lum = to_luminance(image)
     work, work_scale = downscale_plane(lum, WORK_LONG_EDGE)
-    fine, fine_scale = downscale_plane(lum, SKEW_LONG_EDGE)
+    fine, fine_scale = _shrink_plane(work, work_scale, SKEW_LONG_EDGE)
 
     if given is not None:
         resolved, origin = given, "argument"

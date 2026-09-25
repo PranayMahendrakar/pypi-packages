@@ -23,8 +23,6 @@
   "ocr-cleaner",
   "vision-anomaly",
   "document-quality",
-  "audio-anomaly",
-  "production-anomaly",
   "image-dedup-ai",
   "object-counter-ai",
   "video-event-detector",

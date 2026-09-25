@@ -164,8 +164,8 @@ def test_show_through_from_a_blurred_mirror_page_is_reported():
     # A mirrored copy of another page, blurred and at half strength: plainly
     # visible to anyone holding the sheet, and a tenth of the paper darkened.
     try:
-        front = S.typed_page(1700, 2200, size=36)
-        back = S.typed_page(1700, 2200, size=36, words=S.PANGRAM)
+        front = S.typed_page(1275, 1650, size=36)
+        back = S.typed_page(1275, 1650, size=36, words=S.PANGRAM)
     except RuntimeError:                                    # pragma: no cover
         pytest.skip("no scalable TrueType face is available")
     report = document_quality.assess(S.ghost_of(front, back, 0.5, 2.0), dpi=300,

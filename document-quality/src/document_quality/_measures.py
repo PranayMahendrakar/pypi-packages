@@ -88,7 +88,7 @@ SHOW_THROUGH_CLEARANCE = 2
 #: Most the clearance is allowed to grow to, in pixels of that plane.
 SHOW_THROUGH_MAX_CLEARANCE = 20
 #: Native-resolution tiles sampled for sharpness, and how big each one is.
-SHARPNESS_TILES = 24
+SHARPNESS_TILES = 16
 SHARPNESS_TILE_PX = 256
 #: A tile is sampled only when its inked share is at least this share of the
 #: most-inked tile's, and at least :data:`SHARPNESS_MIN_TILE_INK` outright.
@@ -314,7 +314,7 @@ def _edge_step(
         block = lum[top:bottom, left:right].astype(np.float32) / np.float32(255.0)
         if block.size < 16:             # pragma: no cover - guarded by tile size
             continue
-        steps.append(float(np.percentile(gradient(block), EDGE_PERCENTILE)))
+        steps.append(float(np.percentile(gradient(block)[::2, ::2], EDGE_PERCENTILE)))
     if not steps:                       # pragma: no cover - needs a 3-pixel image
         return None
     return float(np.median(steps))
@@ -334,6 +334,7 @@ def _show_through(
     contrast: float,
     edge_step: Optional[float],
     work_normalised: Optional[np.ndarray] = None,
+    work_step: Optional[np.ndarray] = None,
 ) -> float:
     """Share of the page carrying soft, pale marks well away from real ink.
 
@@ -351,7 +352,9 @@ def _show_through(
         # A page small enough that the finer plane would add little over the
         # work plane - under twice its resolution: measure on the work plane.
         normalised, scale = work_normalised, planes.work_scale
+        steps = work_step
     else:
+        steps = None
         plane, scale = _images.downscale_plane(planes.lum, SHOW_THROUGH_LONG_EDGE)
         if plane.size == 0:             # pragma: no cover - guarded by prepare
             return 0.0
@@ -371,7 +374,9 @@ def _show_through(
     smooth_limit = min(
         SHOW_THROUGH_MAX_STEP, SHOW_THROUGH_SMOOTHNESS / max(scale, 1e-6)
     )
-    soft_grey &= gradient(normalised) < np.float32(smooth_limit)
+    if steps is None:
+        steps = gradient(normalised)
+    soft_grey &= steps < np.float32(smooth_limit)
     if soft_grey.any():
         inked = normalised < low
         if clearance <= 4:
@@ -480,7 +485,7 @@ def analyse(
     text_share = float(np.count_nonzero(text_mask)) / normalised.size
 
     edge_step = _edge_step(planes, normalised, light) if ink_share > 0.0 else None
-    show_through = _show_through(planes, light, ink_level, contrast, edge_step, normalised)
+    show_through = _show_through(planes, light, ink_level, contrast, edge_step, normalised, step)
 
     return PageStats(
         ink_level=ink_level, paper_level=paper_level, contrast=contrast,

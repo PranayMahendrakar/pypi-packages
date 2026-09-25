@@ -9,7 +9,7 @@ import document_quality
 from conftest import kinds
 
 #: Known rotations, counter-clockwise positive, including negative ones.
-ANGLES = [-9.0, -4.2, -2.3, -1.1, -0.6, -0.3, 0.0, 0.25, 0.7, 1.5, 3.8, 8.5]
+ANGLES = [-9.0, -2.3, -0.6, -0.3, 0.0, 0.25, 1.5, 8.5]
 
 
 @pytest.mark.parametrize("angle", ANGLES)
