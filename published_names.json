@@ -14,5 +14,7 @@
   "quality-predictor",
   "energy-analyzer-ai",
   "sensor-anomaly",
-  "model-benchmark"
+  "model-benchmark",
+  "offline-ml",
+  "model-watchdog"
 ]

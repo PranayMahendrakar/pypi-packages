@@ -1,6 +1,4 @@
 [
-  "offline-ml",
-  "model-watchdog",
   "ml-inference-profiler",
   "ml-pipeline-kit",
   "prompt-cache",
